@@ -1,0 +1,21 @@
+# Extracted Zalo bundle (never committed — rebuilt every SETUP)
+app/
+
+# Build output
+dist/
+build/
+
+# Dependencies
+node_modules/
+
+# Native modules (rebuilt from source every SETUP, never committed)
+*.node
+
+# Scratch / installer / logs
+temp/
+*.dmg
+*.log
+
+# Editor / local
+.claude/
+.DS_Store
