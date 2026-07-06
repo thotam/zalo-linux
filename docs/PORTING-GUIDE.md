@@ -41,9 +41,9 @@ Orchestrator `scripts/main.js` chạy: **platform-id → renderer-win32 → sqli
 db-cross-v4 → zfile → linux-guards**. Patch critical **throw** khi pattern không khớp
 (fail loud) — không âm thầm ship bản hỏng.
 
-1. **patch-platform-id** — `app/main-dist/main.js` (+`compact-app.js`):
-   `case "LINUX": return 25` -> `24`. Client-type 24 = WIN32 → server bật **đồng bộ
-   lịch sử E2EE**.
+1. **patch-platform-id** — quét **toàn bộ** `app/main-dist/*.js` (`main.js`,
+   `compact-app.js`, `utility-process-media.js`): `case "LINUX": return 25` -> `24`.
+   Client-type 24 = WIN32 → server bật **đồng bộ lịch sử E2EE**.
 2. **patch-renderer-win32** — `app/pc-dist/**.js`: `platform:"DARWIN"` -> `"WIN32"`;
    `getClientType(){return 23}` -> `24`. Renderer vẽ titlebar **win32 gốc**
    (min/max/close) trên cửa sổ frameless. KHÔNG đổi `frame:false`->`true`; KHÔNG dùng

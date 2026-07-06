@@ -72,5 +72,5 @@ async function main() {
   logger.success('zfile installed');
 }
 
-if (require.main === module) main();
+if (require.main === module) main().catch(e => { logger.error(e.message); process.exit(1); });
 module.exports = { main };
