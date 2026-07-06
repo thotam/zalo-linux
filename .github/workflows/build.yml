@@ -1,0 +1,59 @@
+name: Build Zalo for Linux
+
+on:
+  push:
+    tags:
+      - '*'
+  workflow_dispatch:
+    inputs:
+      zalo_version:
+        description: 'Zalo version (empty = latest)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            p7zip-full build-essential libssl-dev liblzma-dev libsqlcipher-dev \
+            dpkg fakeroot
+
+      - name: Install npm deps
+        run: npm install --no-audit --no-fund
+
+      - name: Setup + Build
+        id: build
+        env:
+          ZALO_VERSION: ${{ github.event.inputs.zalo_version }}
+        run: npm run main
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.build.outputs.deb_name }}
+          path: ${{ steps.build.outputs.deb_file }}
+          retention-days: 30
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          files: ${{ steps.build.outputs.deb_file }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
