@@ -3,16 +3,21 @@
 // Run indirectly via scripts/_smoke-boot.sh (needs xvfb + a prepared app/).
 const { app } = require('electron');
 const path = require('path');
+const fs = require('fs');
 
 const SETTLE_MS = parseInt(process.env.SMOKE_SETTLE_MS || '10000', 10); // renderer boot grace
 const NO_WINDOW_MS = parseInt(process.env.SMOKE_WINDOW_MS || '45000', 10);
+const STATUS_FILE = process.env.SMOKE_STATUS_FILE || '';
 
 let done = false;
 function finish(code, msg) {
   if (done) return;
   done = true;
-  if (code === 0) console.log('SMOKE_OK:', msg);
-  else console.error('SMOKE_FAIL:', msg);
+  const line = (code === 0 ? 'SMOKE_OK: ' : 'SMOKE_FAIL: ') + msg;
+  if (code === 0) console.log(line); else console.error(line);
+  // Durable verdict: console output is buffered and can be lost through the
+  // npx -> xvfb-run pipeline on an abrupt app.exit(); the runner reads this file.
+  if (STATUS_FILE) { try { fs.writeFileSync(STATUS_FILE, line + '\n'); } catch (_) {} }
   try { app.exit(code); } catch (_) { process.exit(code); }
 }
 
