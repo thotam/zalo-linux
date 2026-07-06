@@ -8,6 +8,11 @@ build/
 # Dependencies
 node_modules/
 
+# Lock files (not tracked, per project preference)
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
 # Native modules (rebuilt from source every SETUP, never committed)
 *.node
 
