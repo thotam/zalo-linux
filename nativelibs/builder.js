@@ -13,7 +13,7 @@ logger.dim(`Lib dir: ${libDir}`);
 logger.dim(`Electron: ${ELECTRON_VERSION}`);
 
 if (!fs.existsSync(path.join(libDir, 'node_modules'))) {
-  execSync('npm install --no-audit --no-fund --loglevel=error', { cwd: libDir, stdio: 'inherit' });
+  execSync('npm install --ignore-scripts --no-audit --no-fund --loglevel=error', { cwd: libDir, stdio: 'inherit' });
 }
 
 execSync(

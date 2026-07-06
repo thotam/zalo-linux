@@ -12,7 +12,6 @@ const appNL = path.join(repo, 'app', 'native', 'nativelibs');
 const appMD = path.join(repo, 'app', 'main-dist');
 fs.ensureDirSync(path.join(appNL, 'zwalker'));
 fs.ensureDirSync(path.join(appNL, 'mp4thumb'));
-fs.ensureDirSync(path.join(appNL, 'v8-profiles'));
 fs.ensureDirSync(appMD);
 fs.ensureDirSync(path.join(repo, 'scripts', 'utils'));
 const scriptsPatches = path.join(repo, 'scripts', 'patches');
@@ -21,7 +20,6 @@ fs.ensureDirSync(scriptsPatches);
 // Copy real loader sources + a minimal main.js containing the checkAppSigned anchor.
 fs.copyFileSync(path.join(REF, 'native/nativelibs/zwalker/index.js'), path.join(appNL, 'zwalker', 'index.js'));
 fs.copyFileSync(path.join(REF, 'native/nativelibs/mp4thumb/index.js'), path.join(appNL, 'mp4thumb', 'index.js'));
-fs.copyFileSync(path.join(REF, 'native/nativelibs/v8-profiles/index.js'), path.join(appNL, 'v8-profiles', 'index.js'));
 fs.writeFileSync(path.join(appMD, 'main.js'),
   'class C{async checkAppSigned(){return null!=this.isAppSigned?this.isAppSigned:!1}}\nmodule.exports=C;', 'utf8');
 
@@ -41,7 +39,7 @@ const { main } = require(path.join(scriptsPatches, 'patch-linux-guards.js'));
 
   // Each guarded loader must require() without throwing on Linux (run in a child so
   // a stray throw fails the child, not this process).
-  for (const mod of ['zwalker', 'mp4thumb', 'v8-profiles']) {
+  for (const mod of ['zwalker', 'mp4thumb']) {
     const p = path.join(appNL, mod, 'index.js');
     const r = cp.spawnSync(process.execPath, ['-e', `require(${JSON.stringify(p)});console.log('ok')`], { encoding: 'utf8' });
     assert.strictEqual(r.status, 0, `${mod} require threw: ${r.stderr}`);

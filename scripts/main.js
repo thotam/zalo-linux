@@ -23,7 +23,9 @@ async function main() {
       //      sqlite3       : build SQLCipher .node -> napi-v6-linux-x64 slot
       //      db-cross-v4   : build .node + splice linux branch into dist/binding.js
       //      zfile         : build .node + splice linux branch into index.js (parity)
-      //      linux-guards  : short-circuit codesign() + guard zwalker/mp4thumb/v8-profiles
+      //      linux-guards  : short-circuit codesign() + guard zwalker/mp4thumb loaders
+      //      v8-profiles   : build native CPU profiler .node + splice linux require
+      //                      (real native; no fallback stub, by request)
       logger.step('Applying patches');
       await require('./patches/patch-platform-id.js').main();
       await require('./patches/patch-renderer-win32.js').main();
@@ -31,6 +33,7 @@ async function main() {
       await require('./patches/patch-db-cross-v4.js').main();
       await require('./patches/patch-zfile.js').main();
       await require('./patches/patch-linux-guards.js').main();
+      await require('./patches/patch-v8-profiles.js').main();
       logger.success('All patches applied');
     }
 
