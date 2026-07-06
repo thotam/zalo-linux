@@ -1,0 +1,40 @@
+{
+  "name": "zalo-linux",
+  "version": "1.0.0",
+  "description": "Zalo desktop re-ported to Linux x64 from the official macOS DMG (ZaloSetup-universal), packaged as .deb",
+  "main": "main.js",
+  "license": "MIT",
+  "scripts": {
+    "setup": "SETUP=true node scripts/main.js",
+    "build": "BUILD=true node scripts/main.js",
+    "main": "SETUP=true BUILD=true node scripts/main.js",
+    "start": "electron . --no-sandbox"
+  },
+  "devDependencies": {
+    "@electron/asar": "^4.0.1",
+    "electron": "22.3.27",
+    "electron-builder": "^26.0.12",
+    "fs-extra": "^11.2.0",
+    "node-addon-api": "^5.0.0"
+  },
+  "build": {
+    "appId": "com.zalo.linux",
+    "productName": "Zalo",
+    "directories": { "output": "dist" },
+    "files": ["main.js", "package.json"],
+    "extraFiles": [
+      { "from": "app", "to": "app", "filter": ["**/*", "!node_modules", "!package-lock.json", "!package.json.bak"] }
+    ],
+    "asarUnpack": ["**/*.node"],
+    "buildDependenciesFromSource": false,
+    "nodeGypRebuild": false,
+    "npmRebuild": false,
+    "linux": {
+      "target": "deb",
+      "category": "Network",
+      "maintainer": "thotam <thanhtamtotaa@gmail.com>",
+      "synopsis": "Zalo messaging app for Linux",
+      "icon": "app/pc-dist/favicon-512x512.png"
+    }
+  }
+}
