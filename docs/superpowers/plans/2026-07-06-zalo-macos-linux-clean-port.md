@@ -945,6 +945,15 @@ module.exports = { main };
 
 ### Task 6: zfile native (build from source)
 
+> **DESIGN UPDATE (per user, matching old-project pre-`00294d6` state):** the JS Proxy wrapper
+> `zfile-linux.js` is DROPPED. `index.js` requires `./linux/zfile-native.node` **directly** — the
+> native addon exports exactly the methods `getLib()` calls (`getInfo/getDiskInfo/copyFolder/
+> cancelCopy/canRead/canWrite/canReadAndWrite`), and zfile has 0 call sites in this bundle, so the
+> renderer's by-path disk lookup (the only thing the Proxy served) never runs. IGNORE the
+> `zfile-linux.js` create/copy steps, the `destWrapper` post-condition, and the Proxy path-probe
+> post-condition shown below; the committed `patch-zfile.js` omits them.
+
+
 **Files:**
 - Create `/mnt/data/Work/zalo-linux/nativelibs/zfile/binding.gyp` (copy verbatim)
 - Create `/mnt/data/Work/zalo-linux/nativelibs/zfile/package.json` (copy verbatim)
@@ -1037,7 +1046,7 @@ Confirmed source shape (already verified, so the implementer knows the regex wil
       // matches the stub: `}else{ return { stat... }` (whitespace-tolerant)
       c = c.replace(
         /\}\s*else\s*\{\s*return\s*\{\s*\n?\s*stat:/,
-        "}else if(process.platform === 'linux'){\n        addon = require('./linux/zfile-linux.js');\n    }else{\n        return {\n            stat:"
+        "}else if(process.platform === 'linux'){\n        addon = require('./linux/zfile-native.node');\n    }else{\n        return {\n            stat:"
       );
       if (c === before) {
         throw new Error("patch-zfile: could not insert linux branch — zfile/index.js format changed, update the regex");
@@ -1095,7 +1104,7 @@ Confirmed source shape (already verified, so the implementer knows the regex wil
   Expected: `1`
 
 - [ ] **Step 9: Commit.**
-  Run: `cd /mnt/data/Work/zalo-linux && git add nativelibs/zfile/binding.gyp nativelibs/zfile/package.json nativelibs/zfile/src/zfile.cc nativelibs/zfile/zfile-linux.js scripts/patches/patch-zfile.js && git commit -m "Add zfile native source + patch-zfile (build from source, splice linux branch)"`
+  Run: `cd /mnt/data/Work/zalo-linux && git add nativelibs/zfile/binding.gyp nativelibs/zfile/package.json nativelibs/zfile/src/zfile.cc scripts/patches/patch-zfile.js && git commit -m "Add zfile native source + patch-zfile (build from source, splice linux branch)"`
   Expected: one commit created. (Note: `app/`, `nativelibs/zfile/build/`, and `*.node` are gitignored and must NOT be committed.)
 
 ---
