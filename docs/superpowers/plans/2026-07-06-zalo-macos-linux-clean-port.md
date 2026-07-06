@@ -22,6 +22,7 @@
 - **Patch runtime order** (enforced by the orchestrator, Task 11) — platform-id → renderer-win32 → sqlite3 → db-cross-v4 → zfile → linux-guards — differs from the task-authoring order below (tasks are numbered by build/dependency order).
 - **System deps** (Debian/Ubuntu): `p7zip-full build-essential libssl-dev liblzma-dev libsqlcipher-dev dpkg fakeroot` (+ `xvfb` for the smoke test).
 - **Commits**: the per-task commit steps are review checkpoints. Per project rule, actually run `git commit` only when the user explicitly approves.
+- **Lock files are NOT tracked** (`package-lock.json`/`yarn.lock`/`pnpm-lock.yaml` are gitignored). Never `git add` a lock file; CI uses `npm install`, not `npm ci`.
 
 ---
 
@@ -226,7 +227,7 @@
 - [ ] **Step 12: Commit the scaffold.**
   Run:
   ```bash
-  cd /mnt/data/Work/zalo-linux && git add .gitignore package.json package-lock.json run-dev.sh scripts/utils/logger.js README.md && git commit -m "Task 1: project scaffold (package.json, logger, run-dev, gitignore, README)"
+  cd /mnt/data/Work/zalo-linux && git add package.json run-dev.sh scripts/utils/logger.js README.md && git commit -m "Task 1: project scaffold (package.json, logger, run-dev, gitignore, README)"
   ```
   Expected: a commit is created; `git status` shows `node_modules/` untracked/ignored (not staged) and a clean tree otherwise.
 
@@ -425,7 +426,7 @@ module.exports = { main };
     ```
 
 - [ ] **Step 7: Commit the two scripts (do NOT commit `app/`).** `app/`, `temp/`, `*.dmg` are gitignored per spec §3; add files explicitly so nothing from `app/` is staged.
-  - Run: `cd /mnt/data/Work/zalo-linux && git add scripts/download-installer.js scripts/extract-installer.js package.json package-lock.json && git commit -m "Add DMG extraction pipeline (download + 7z extract + asar extractAll + unpacked overlay)"`
+  - Run: `cd /mnt/data/Work/zalo-linux && git add scripts/download-installer.js scripts/extract-installer.js package.json && git commit -m "Add DMG extraction pipeline (download + 7z extract + asar extractAll + unpacked overlay)"`
   - Expected: commit succeeds; `git status --porcelain app/` prints nothing (the extracted bundle stays untracked).
 
 ---
@@ -1976,7 +1977,7 @@ jobs:
             dpkg fakeroot
 
       - name: Install npm deps
-        run: npm ci --prefer-offline --no-audit
+        run: npm install --no-audit --no-fund
 
       - name: Setup + Build
         id: build
@@ -2002,7 +2003,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-  Note: `npm run main` = `SETUP=true BUILD=true node scripts/main.js`. `ZALO_VERSION` (from the `workflow_dispatch` input) is read by `download-installer.js`; on a tag push the input is empty so the latest DMG is resolved. `npm ci` requires the committed `package-lock.json` (Task 1). Smoke boot is intentionally **not** in CI (per spec §9 — it needs a display and is a local check); CI is download → extract → patch → build → package.
+  Note: `npm run main` = `SETUP=true BUILD=true node scripts/main.js`. `ZALO_VERSION` (from the `workflow_dispatch` input) is read by `download-installer.js`; on a tag push the input is empty so the latest DMG is resolved. `npm install` (not `npm ci`) — lock files are gitignored per project preference, so there is no committed `package-lock.json`. Smoke boot is intentionally **not** in CI (per spec §9 — it needs a display and is a local check); CI is download → extract → patch → build → package.
 
 - [ ] **Step 2: Verify the workflow parses and the SQLCipher dep + tag gate are present.**
   - Run: `cd /mnt/data/Work/zalo-linux && python3 -c "import yaml;d=yaml.safe_load(open('.github/workflows/build.yml'));print(list(d['jobs']['build']['steps'][-1]['if']))" 2>/dev/null | head -c1; echo; grep -c 'libsqlcipher-dev' .github/workflows/build.yml; grep -c "startsWith(github.ref, 'refs/tags/')" .github/workflows/build.yml`
