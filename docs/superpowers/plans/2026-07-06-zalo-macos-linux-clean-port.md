@@ -1717,6 +1717,9 @@ main();
 
 ### Task 12: Smoke boot test
 
+> **UPDATE (verified boot):** the smoke boot was run headless and the app boots successfully — 4 BrowserWindows, `login.html?type=24` renders, sqlite3(SQLCipher)+db-cross-v4 load without throwing, window stays alive. Two fixes were applied to the committed scripts vs the code shown below: (1) `_smoke-boot.sh` isolates the Zalo profile into a temp `XDG_*_HOME` so it NEVER touches the user's real `~/.config/ZaloData`; (2) `_smoke-main.js` writes its verdict to a durable `SMOKE_STATUS_FILE` (console output is lost through npx->xvfb on abrupt app.exit), which the runner reads instead of grepping stdout.
+
+
 **Files:**
 - Create `/mnt/data/Work/zalo-linux/scripts/_smoke-main.js` (throwaway Electron entry that wraps the real `main.js` with assertions — keeps `main.js` clean).
 - Create `/mnt/data/Work/zalo-linux/scripts/_smoke-boot.sh` (headless runner, `chmod +x`).
