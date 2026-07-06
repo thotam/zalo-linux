@@ -32,7 +32,7 @@
     "linux": {
       "target": "deb",
       "category": "Network",
-      "maintainer": "thotam <thanhtamtotaa@gmail.com>",
+      "maintainer": "thotam <thanhtamtqno1@gmail.com>",
       "synopsis": "Zalo messaging app for Linux",
       "icon": "app/pc-dist/favicon-512x512.png"
     }

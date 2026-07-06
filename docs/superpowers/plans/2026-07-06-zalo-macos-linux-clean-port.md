@@ -43,7 +43,7 @@
   - `run-dev.sh` — dev entrypoint used for smoke boot.
 
 - [ ] **Step 1: Initialize the git repo.**
-  Run: `cd /mnt/data/Work/zalo-linux && git init && git config user.name "thotam" && git config user.email "thanhtamtotaa@gmail.com"`
+  Run: `cd /mnt/data/Work/zalo-linux && git init && git config user.name "thotam" && git config user.email "thanhtamtqno1@gmail.com"`
   Expected: `Initialized empty Git repository in /mnt/data/Work/zalo-linux/.git/`
 
 - [ ] **Step 2: Create `.gitignore`.**
@@ -105,7 +105,7 @@
       "linux": {
         "target": "deb",
         "category": "Network",
-        "maintainer": "thotam <thanhtamtotaa@gmail.com>",
+        "maintainer": "thotam <thanhtamtqno1@gmail.com>",
         "synopsis": "Zalo messaging app for Linux",
         "icon": "app/pc-dist/favicon-512x512.png"
       }
@@ -1886,7 +1886,7 @@ module.exports = { main };
     "linux": {
       "target": "deb",
       "category": "Network",
-      "maintainer": "thotam <thanhtamtotaa@gmail.com>",
+      "maintainer": "thotam <thanhtamtqno1@gmail.com>",
       "synopsis": "Zalo messaging app for Linux",
       "description": "Zalo desktop (Vietnamese messenger) re-ported to Linux from the official macOS build, packaged as .deb.",
       "icon": "app/pc-dist/favicon-512x512.png",
