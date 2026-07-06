@@ -27,11 +27,25 @@ async function main() {
   fs.copyFileSync(path.join(releaseDir, nodeFiles[0]), destNode);
   logger.dim('Installed Linux zfile-native.node');
 
-  // Splice a linux branch into index.js that requires the native .node DIRECTLY
-  // (no JS wrapper). The native addon exports exactly the methods getLib() calls
-  // (getInfo/getDiskInfo/copyFolder/cancelCopy/canRead/canWrite/canReadAndWrite),
-  // so index.js uses it unwrapped. zfile has 0 call sites in this bundle; it is
-  // built only for parity, so the renderer's by-path disk lookup never runs here.
+  // Install the JS wrapper that resolves getDiskInfo() lookups by absolute path.
+  // zfile IS used by the renderer's Data-Management screen, which looks up disk
+  // info BY PATH (e.g. the user-data dir) via its own `formatDrivePath`. That
+  // function is Windows-only (returns the path unchanged on Linux), and our native
+  // getDiskInfo() is keyed by MOUNT POINT — so a bare `diskInfo()["/home/user/..."]`
+  // returns undefined -> `undefined.label` throws and the screen hangs (verified).
+  // The wrapper returns a Proxy whose get-trap resolves any absolute path to its
+  // longest-prefix mount entry (verified correct for data on "/" and on other
+  // mounts like "/mnt/data"). Enumeration (Object.keys/entries) still yields the
+  // real mount points, so the drive-list bar keeps working.
+  const wrapperSrc = path.join(LIB_DIR, 'zfile-linux.js');
+  const destWrapper = path.join(DEST_DIR, 'zfile-linux.js');
+  if (!fs.existsSync(wrapperSrc)) {
+    throw new Error('zfile wrapper source not found at nativelibs/zfile/zfile-linux.js');
+  }
+  fs.copyFileSync(wrapperSrc, destWrapper);
+  logger.dim('Installed Linux zfile-linux.js wrapper');
+
+  // Splice a linux branch into index.js that requires the WRAPPER (not the raw .node).
   if (!fs.existsSync(INDEX_JS)) {
     throw new Error('zfile/index.js not found — did extraction overlay app.asar.unpacked?');
   }
@@ -41,32 +55,42 @@ async function main() {
     // matches the stub: `}else{ return { stat... }` (whitespace-tolerant)
     c = c.replace(
       /\}\s*else\s*\{\s*return\s*\{\s*\n?\s*stat:/,
-      "}else if(process.platform === 'linux'){\n        addon = require('./linux/zfile-native.node');\n    }else{\n        return {\n            stat:"
+      "}else if(process.platform === 'linux'){\n        addon = require('./linux/zfile-linux.js');\n    }else{\n        return {\n            stat:"
     );
     if (c === before) {
       throw new Error("patch-zfile: could not insert linux branch — zfile/index.js format changed, update the regex");
     }
     fs.writeFileSync(INDEX_JS, c, 'utf8');
-    logger.dim('Patched zfile/index.js with linux branch (requires zfile-native.node directly)');
+    logger.dim('Patched zfile/index.js with linux branch (requires zfile-linux.js wrapper)');
   } else {
     logger.dim('zfile/index.js already has linux branch');
   }
 
-  // Post-conditions: fail hard if the native lib or the branch did not land.
+  // Post-conditions: native lib, wrapper, and branch must all be present.
   if (!fs.existsSync(destNode) || fs.statSync(destNode).size === 0) {
     throw new Error(`patch-zfile: post-condition failed — ${destNode} missing/empty`);
+  }
+  if (!fs.existsSync(destWrapper) || fs.statSync(destWrapper).size === 0) {
+    throw new Error(`patch-zfile: post-condition failed — ${destWrapper} missing/empty`);
   }
   const after = fs.readFileSync(INDEX_JS, 'utf8');
   if (!after.includes("process.platform === 'linux'")) {
     throw new Error('patch-zfile: post-condition failed — linux branch not present in index.js');
   }
-  // Load index.js the way the app does and assert diskInfo() works against the
-  // native addon (mount-keyed) without throwing.
+  // Load index.js the way the app does and assert diskInfo() works.
   delete require.cache[require.resolve(INDEX_JS)];
   const zfile = require(INDEX_JS);
   const disks = await zfile.diskInfo();
   if (!disks || typeof disks !== 'object' || Object.keys(disks).length === 0) {
     throw new Error('patch-zfile: post-condition failed — zfile.diskInfo() returned no drives');
+  }
+  // The renderer looks up disk info by absolute path, not by mount point. Assert
+  // the path-resolving Proxy maps an arbitrary absolute path to its containing
+  // mount entry (numeric totalSpace) — otherwise the Data-Management screen throws
+  // `undefined.label` and spins forever.
+  const probe = disks['/some/deep/nonexistent/path/for/postcondition'];
+  if (!probe || typeof probe.totalSpace !== 'number' || probe.totalSpace <= 0) {
+    throw new Error('patch-zfile: post-condition failed — diskInfo() Proxy did not resolve an absolute path to a mount entry (renderer by-path lookup would throw)');
   }
 
   logger.success('zfile installed');

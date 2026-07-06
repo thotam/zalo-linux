@@ -945,13 +945,14 @@ module.exports = { main };
 
 ### Task 6: zfile native (build from source)
 
-> **DESIGN UPDATE (per user, matching old-project pre-`00294d6` state):** the JS Proxy wrapper
-> `zfile-linux.js` is DROPPED. `index.js` requires `./linux/zfile-native.node` **directly** — the
-> native addon exports exactly the methods `getLib()` calls (`getInfo/getDiskInfo/copyFolder/
-> cancelCopy/canRead/canWrite/canReadAndWrite`), and zfile has 0 call sites in this bundle, so the
-> renderer's by-path disk lookup (the only thing the Proxy served) never runs. IGNORE the
-> `zfile-linux.js` create/copy steps, the `destWrapper` post-condition, and the Proxy path-probe
-> post-condition shown below; the committed `patch-zfile.js` omits them.
+> **DESIGN NOTE (corrected):** zfile IS used — the renderer's Data-Management screen looks up
+> disk info BY ABSOLUTE PATH via a Windows-only `formatDrivePath` that no-ops on Linux, while our
+> native `getDiskInfo()` is keyed by mount point, so a bare by-path lookup returns undefined →
+> `undefined.label` hangs the screen (verified & reproduced). Therefore the JS Proxy wrapper
+> `nativelibs/zfile/zfile-linux.js` IS kept: `index.js` requires `./linux/zfile-linux.js`, whose
+> `getDiskInfo()` returns a Proxy resolving any absolute path to its longest-prefix mount entry
+> (correct for data on `/` or other mounts like `/mnt/data`; enumeration still yields real mount
+> points). The wrapper-copy + Proxy path-probe steps below are authoritative.
 
 
 **Files:**
