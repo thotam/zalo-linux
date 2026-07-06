@@ -34,7 +34,31 @@
       "category": "Network",
       "maintainer": "thotam <thanhtamtqno1@gmail.com>",
       "synopsis": "Zalo messaging app for Linux",
-      "icon": "app/pc-dist/favicon-512x512.png"
+      "description": "Zalo desktop (Vietnamese messenger) re-ported to Linux from the official macOS build, packaged as .deb.",
+      "icon": "app/pc-dist/favicon-512x512.png",
+      "mimeTypes": ["x-scheme-handler/zalo"],
+      "desktop": {
+        "entry": {
+          "Name": "Zalo",
+          "Comment": "Zalo messaging app",
+          "Categories": "Network;InstantMessaging;",
+          "StartupWMClass": "Zalo"
+        }
+      }
+    },
+    "deb": {
+      "depends": [
+        "libgtk-3-0",
+        "libnotify4",
+        "libnss3",
+        "libxss1",
+        "libxtst6",
+        "xdg-utils",
+        "libatspi2.0-0",
+        "libuuid1",
+        "libsecret-1-0",
+        "libsqlcipher0 | libsqlcipher1 | libsqlcipher2"
+      ]
     }
   }
 }
