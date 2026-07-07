@@ -16,6 +16,10 @@ pnpm-lock.yaml
 # Native modules (rebuilt from source every SETUP, never committed)
 *.node
 
+# zjxl heavy deps (built from pinned source into a content-addressed cache)
+nativelibs/zjxl/.deps-prefix/
+nativelibs/zjxl/deps-src/
+
 # Scratch / installer / logs
 temp/
 *.dmg
