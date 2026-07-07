@@ -89,7 +89,7 @@ Layered, strongest-first:
 3. **resize** — resize a real JXL both ways; compare bytes / pixel PSNR.
 4. **smoke boot** — under XDG-isolated profile, open a chat containing JXL images → they render; send an image → peer receives it.
 
-Real `.jxl` samples come from the user's Zalo media cache (provided) — never touch the live profile in-place; copy samples into the scratchpad.
+Real `.jxl` samples come from the user's Zalo media cache (provided) — never touch the live profile in-place; copy samples into the scratchpad. **Collected:** 22 real Zalo `.jxl` files (all `ff0a` raw codestream, 44 KB–621 KB) copied read-only to `scratchpad/jxl-samples/`. Several share identical codestream prefixes (`ff0a0224e83f0d…`, `ff0afa2c1d…`) → same Zalo encode-settings class, useful for cross-checking recovered params.
 
 ## 7. Patch integration
 
@@ -105,8 +105,8 @@ Register in `scripts/main.js` after `patch-v8-profiles`. Add `scripts/patches/__
 
 ## 8. `.deb` packaging & CI
 
+- **Linking decision (fidelity):** the static-vs-dynamic choice does **not** change output image bytes — those depend only on library version + params. For maximum faithfulness we **mirror the mac layout exactly**: bundle the same set of **dynamic `.so`** the mac ships as `.dylib` (`libjxl`, `libjxl_cms`, `libjxl_dec`, `libjxl_threads`, `libhwy`, `libbrotli{common,dec,enc}`, `libjpeg`/`libturbojpeg`, `libopencv_core`, `libopencv_imgproc`) into `build/linux_x64/`, addon linked with `RPATH=$ORIGIN`. This guarantees the exact pinned library build is what runs at runtime.
 - Bundled `.so` ship inside the app (no runtime system dependency on libjxl 0.9 / OpenCV 4.12).
-- Statically link where practical to minimize the bundled `.so` count; otherwise bundle and set RPATH.
 - **CI build-time deps** (GitHub Actions apt list): `build-essential cmake nasm ninja-build` (+ whatever OpenCV/libjxl configure needs). No new runtime `build.deb.depends` unless a residual system lib is unavoidable.
 
 ## 9. Out of scope (v1)
