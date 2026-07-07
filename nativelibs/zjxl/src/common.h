@@ -31,4 +31,13 @@ bool DecodeToRgb(const std::vector<uint8_t>& in, std::vector<uint8_t>& rgb,
 bool RgbToJpeg(const std::vector<uint8_t>& rgb, uint32_t w, uint32_t h,
                int quality, const std::vector<uint8_t>& icc,
                std::vector<uint8_t>& jpeg);
+// Raw interleaved pixels -> JXL codestream, matching the mac encodeJxlOneshot
+// contract exactly (all params from zjxl_re::kEncode*: distance 2.28, effort 1,
+// decoding-speed 4, lossy, 8-bit, 3-channel RGB, no alpha, SRGB). `channels` is
+// the input channel count (3=RGB, 4=RGBA); 4ch input has its alpha dropped so
+// the output is always 3-channel RGB (the mac contract). Defined in encode.cc;
+// shared with Task 7 (resizeJxl re-encode, RE-confirmed identical params).
+// Frees the encoder and parallel runner on all paths. Returns false on failure.
+bool EncodeJxl(const std::vector<uint8_t>& px, uint32_t w, uint32_t h,
+               uint32_t channels, std::vector<uint8_t>& out);
 }  // namespace zjxl
