@@ -1,0 +1,7 @@
+{
+  "name": "zjxl-native",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Linux native JPEG-XL codec addon (RE of Zalo jxl.node)",
+  "dependencies": { "node-addon-api": "^5.1.0" }
+}
