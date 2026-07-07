@@ -1,0 +1,31 @@
+{
+  "zimage": {
+    "bundled": {
+      "libvips-cpp.42.dylib": "59.2.0"
+    },
+    "links": {}
+  },
+  "zjxl": {
+    "bundled": {
+      "libbrotlicommon.1.dylib": "1.0.9",
+      "libbrotlidec.1.dylib": "1.0.9",
+      "libbrotlienc.1.dylib": "1.0.9",
+      "libhwy.1.0.7.dylib": "1.0.7",
+      "libjpeg.62.4.0.dylib": "62.4.0",
+      "libjxl.0.9.dylib": "0.9.3",
+      "libjxl_cms.0.9.dylib": "0.9.3",
+      "libjxl_dec.0.9.dylib": "0.9.3",
+      "libjxl_threads.0.9.dylib": "0.9.3",
+      "libopencv_core.412.dylib": "4.12.0",
+      "libopencv_imgproc.412.dylib": "4.12.0",
+      "libturbojpeg.0.dylib": "3.1.1"
+    },
+    "links": {}
+  },
+  "zwalker": {
+    "bundled": {
+      "libzwalker.dylib": "0.0.0"
+    },
+    "links": {}
+  }
+}

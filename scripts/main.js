@@ -26,6 +26,19 @@ async function main() {
       //      linux-guards  : short-circuit codesign() + guard zwalker/mp4thumb loaders
       //      v8-profiles   : build native CPU profiler .node + splice linux require
       //                      (real native; no fallback stub, by request)
+      // Notify (non-fatally) if this Zalo build changed any bundled/linked native
+      // library version vs our tracked baseline — so pins (e.g. zjxl libjxl /
+      // libjpeg-turbo) can be updated to stay byte-identical. Never blocks SETUP.
+      logger.step('Checking native library versions');
+      try {
+        require('child_process').execSync(
+          'node "' + require('path').join(__dirname, '..', 'nativelibs', 'scripts', 'check-native-versions.js') + '" --notice',
+          { stdio: 'inherit' }
+        );
+      } catch (e) {
+        logger.dim('native-version check skipped: ' + e.message);
+      }
+
       logger.step('Applying patches');
       await require('./patches/patch-platform-id.js').main();
       await require('./patches/patch-renderer-win32.js').main();
