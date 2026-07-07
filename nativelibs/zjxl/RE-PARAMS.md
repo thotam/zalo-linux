@@ -273,6 +273,80 @@ zero** (no +0.5 rounding). A standalone C oracle reproduces the shipped dims:
 
 ---
 
+## jxlDecompressMulti — batch decode contract (Task 8)
+
+**Certain — disassembled** `jxlDecompressMulti` @0x5d4d, `JxlDecompressMultiAsyncWorker::`
+`Execute` @0x496e / `OnOK` @0x4a1a, `jxlDecompressMultiHandler` @0xcd90 →
+`DecodeBlobJxlMulti` @0xcb52 → `ProcessDecompressTasks` @0xb7fa. Ported in `src/multi.cc`.
+
+### Semantics — decode ONCE, resize+re-encode PER TASK, output is JPEG
+The name is misleading: it is not a per-item decode loop. A **single** source JXL (`buffer`
+or `localPath`) is decoded once to RGB8+ICC (`decodeJpegXlOneShot` @0xcc32); then each
+`tasks[]` entry independently resizes the decoded image (`resizePPFWithOpenCV` @0xb938, the
+two-stage OpenCV path below) and **re-encodes it to JPEG** (`encodeJpegOneShotTurbo` @0xb967
+/ @0xbac2 — the SAME turbojpeg helper as `jxlToJpeg`: baseline 4:2:0, fast DCT, ICC
+embedded). The batch output is therefore **JPEG bytes, not raw RGB and not JXL** — the
+controller's "most likely raw RGB" guess was wrong; the binary re-encodes every task.
+
+### Input `options` keys — certain (jxlDecompressMulti @0x5d4d)
+| key | type | default | @addr |
+|---|---|---|---|
+| `buffer` | Buffer | — | Has/Get @0x5daf; blob source |
+| `localPath` | String | — | @0x5e1b; file source (used when no buffer) |
+| `decodeLocalOneShotThreshold` | uint32 | `0x6400000` (100 MiB) | @0x5e80 |
+| `quality` | float 0..1 ×100 | **95** (`0x5f` @0x5ec1) | mulss 100.0 @0x5eed |
+| `chunkSize` | int32 | `0x40000000` | @0x5f0c |
+| `maxThreads` | uint32 | **8** | @0x5f9d |
+| `tasks` | Array\<Task\> | one all-`-1` task (@0x6204) | @0x5fbc |
+
+Each `tasks[]` entry (`DecompressTask`, push_back @0x61eb; struct offsets maxWidth@0,
+maxHeight@4, width@8, height@12, outputPath@16):
+`{ maxWidth:int=-1, maxHeight:int=-1, width:int=-1, height:int=-1, outputPath:string="" }`.
+
+### Per-task resize decision — `ProcessDecompressTasks` @0xb897..0xb8f9 — certain
+Downscale-only, signed compares. Priority: explicit `width`/`height` first, then
+`maxWidth`/`maxHeight`; an axis "counts" iff `>0 && <source`:
+```
+if (width!=-1 && height!=-1 && ((width>0 && width<srcW) || (height>0 && height<srcH)))
+    target = (width, height)
+else if (maxWidth>0 && maxWidth<srcW)              target = (maxWidth, maxHeight)
+else if (maxHeight>0 && maxHeight<srcH)            target = (maxWidth, maxHeight)
+else                                              NO resize (encode source dims) @0xba99
+```
+The resize target is passed to `resizePPFWithOpenCV(pixels, srcW, srcH, CV_8UC3=0x10 @0xb935,
+targetW, targetH, &out, &outW, &outH)`.
+
+### Output shape — `OnOK` @0x4a1a — certain
+The callback is `(error, data, status_code)`. `data` is a **Napi::Array** with one object per
+task (Array::New sized by `(vec.end-vec.begin)/0x30` @0x4a73; `JxlDecompressMultiOutput` is
+0x30 bytes: data@0, size@8, outputPath@0x10, width@0x28, height@0x2c). Each object
+(Set calls @0x4b56/@0x4be5/@0x4c1a/@0x4c53/@0x4c8f):
+```
+{ data: Buffer|undefined,  // NewOrCopy over {ptr,len} @0x4b40; undefined when written to file
+  size: Number,            // JPEG byte length (always set)
+  outputPath: String,      // the task's outputPath ("" when returned inline)
+  width: Number, height: Number }   // the RESIZED (output) dims
+```
+If a task has a non-empty `outputPath`, the JPEG is written to disk (`WriteFileByChunk`
+@0xb9ab) and its output object carries **no** `data` buffer (mac null ptr → JS `undefined`),
+only `size`/`outputPath`/`width`/`height`. Otherwise the JPEG is copied into `data`.
+
+`status_code` = `JxlOutput.status` @[worker+0xf8]. It defaults to **1** and is only
+overwritten on error (`DecodeBlobJxlMulti` @0xccaa; handler @0xce1e). The JS enum
+(`utility-process-media.js`) is `FAILURE_STATUS=0, SUCCESS_STATUS=1`; the renderer gates on
+`a.status_code === SUCCESS_STATUS (1)` and consumes `a.data`. So success = **1** (unlike the
+`OK=0` used internally by the single-shot paths). The Linux port returns 1 on success and 0
+on error via `OnError`.
+
+**assumed (minor):** (a) single-threaded task loop — the mac has a `ProcessDecompressTasks`
+`Threads`/`jxl::ThreadPool` variant @0xec30 gated on `maxThreads`, but each task is
+independent and deterministic so the OUTPUT is identical; `maxThreads`/`chunkSize`/
+`decodeLocalOneShotThreshold` are parsed but not needed for byte-identical pixels.
+(b) `WriteFileByChunk`'s `[info+0x48]` start-offset is treated as 0 (whole-file write); its
+return is unchecked in the mac loop, so a write failure does not fail the batch (matched).
+
+---
+
 ## Resize path — `resizePPFWithOpenCV`  (Task-8 decode/batch path — see correction above)
 
 Two overloads exist and are byte-identical in logic: signed-dims @0x8c8d and unsigned-dims

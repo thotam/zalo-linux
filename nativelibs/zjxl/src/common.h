@@ -40,4 +40,11 @@ bool RgbToJpeg(const std::vector<uint8_t>& rgb, uint32_t w, uint32_t h,
 // Frees the encoder and parallel runner on all paths. Returns false on failure.
 bool EncodeJxl(const std::vector<uint8_t>& px, uint32_t w, uint32_t h,
                uint32_t channels, std::vector<uint8_t>& out);
+// clampSize @0x12e7c — aspect-preserving downscale of (srcW,srcH) into the
+// (capW,capH) box with truncation, matching the mac verbatim. Defined in
+// resize.cc (Task 7); shared with Task 8's OpenCV two-stage resize so the batch
+// path's clamp math is identical (do not re-derive). See RE-PARAMS.md
+// "## clampSize formula".
+void ClampSize(uint32_t srcW, uint32_t srcH, uint32_t capW, uint32_t capH,
+               uint32_t& outW, uint32_t& outH);
 }  // namespace zjxl

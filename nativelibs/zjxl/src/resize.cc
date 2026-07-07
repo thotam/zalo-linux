@@ -35,8 +35,10 @@ namespace zjxl {
 // otherwise it returns the source dims unchanged. Rounding is TRUNCATION
 // (cvttsd2si) at every step.
 // ---------------------------------------------------------------------------
-static void ClampSize(uint32_t srcW, uint32_t srcH, uint32_t capW, uint32_t capH,
-                      uint32_t& outW, uint32_t& outH) {
+// Non-static: also reused by the Task-8 batch/decode OpenCV resize (multi.cc)
+// via the declaration in common.h. Do not duplicate this port.
+void ClampSize(uint32_t srcW, uint32_t srcH, uint32_t capW, uint32_t capH,
+               uint32_t& outW, uint32_t& outH) {
   bool scale;
   if (srcW <= capW && srcH <= capH) {
     scale = false;  // both fit (asm: cmp/ja + cmp/jbe -> no-scale)
