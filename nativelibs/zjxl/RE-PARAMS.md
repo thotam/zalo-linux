@@ -168,7 +168,112 @@ decoders (`DecodeLocalPathJXLMulti` @0xc324, `...Oneshot` @0xbcb0) share this fo
 
 ---
 
-## Resize path — `resizePPFWithOpenCV`
+## ⚠️ CORRECTION — the exported `resizeJxl` does NOT use OpenCV (uses hand-rolled bilinear)
+
+**Task-7 RE (this correction supersedes the OpenCV description below for the
+`resizeJxl` export.)** The exported `resizeJxl` in BOTH mac binaries
+(darwin_x64 @0x9f20 and darwin_arm64 @0x9184) resizes with a **hand-rolled
+single-pass bilinear** (`bilinearInterpolate`), NOT OpenCV, NOT the two-stage
+INTER_LINEAR→INTER_AREA pipeline. Confirmed call chain (x64, `axt` after `aaa`):
+
+```
+ResizeJxlAsyncWorker::Execute @0x44fd
+  -> resizeJxl @0x9f20            decode -> resizePPF -> encodeJxlOneshot (@0xa0ce)
+     -> resizePPF @0x8a82         target dims via clampSize; then:
+        -> bilinearInterpolate @0x12eea   (the resampler)
+```
+
+`resizePPFWithOpenCV` (@0x8c8d / @0xb578) DOES exist but its ONLY callers are the
+**decode/batch** paths, never resizeJxl:
+```
+axt @0xb578 -> ProcessDecompressTasks @0xb938 ; jxlDecompressMulti thread body @0xec30
+axt @0x8c8d -> DecodeLocalPathJXLProgressive @0xac46, @0xadea
+```
+So the OpenCV two-stage (1000px INTER_LINEAR pre-scale + INTER_AREA) belongs to
+**jxlDecompressMulti / DecodeLocalPath** (Task 8), not `resizeJxl` (Task 7).
+`shouldResize` @0xa528 has **no callers** (dead code) — `resizeJxl` never gates on
+it and always re-encodes (even a no-op "resize" round-trips through the lossy
+encoder). `kResizeInterp` / `kResizePreScaleInterp` / `kResizePreScaleCap` in
+`re_params.h` therefore apply to the Task-8 decode path, not resizeJxl.
+
+### resizeJxl target-dimension math — `resizePPF` @0x8a82
+`resizePPF(PackedPixelFile&, int reqW, int reqH)` (reqW/reqH from JS width/height;
+`-1` = auto sentinel). Computes final dims then, iff they differ from source,
+calls `bilinearInterpolate`; otherwise leaves pixels as-is (resizeJxl re-encodes
+regardless).
+- **both auto** (reqW==reqH==-1, @0x8af9): final = source.
+- **both given** (@0x8b09, the JS `{width,height}` case): `clampSize(src, reqW,
+  reqH)` then `clampSize(that, 65500, 65500)` (overflow guard).
+- **one axis auto**: derive the other by integer aspect —
+  height-auto (@0x8b52): `fH = min(srcW,reqW,65500)*srcH/srcW`, `fW = reqW`;
+  width-auto (@0x8ad5): `fW = min(srcH,reqH,65500)*srcW/srcH`, `fH = reqH`.
+
+### resizeJxl resampler — `bilinearInterpolate` @0x12eea (byte-identical port)
+`std::vector<uchar> bilinearInterpolate(uchar* src, ulong srcSize, int srcW, int
+srcH, int dstW, int dstH)` (returned via RVO in rdi). Per output pixel (row j,
+col i, channel c of 3):
+```
+xr = srcW/dstW ; yr = srcH/dstH            ; (double; no 0.5 center offset)
+sy = j*yr ; y0 = trunc(sy) ; dy = sy-trunc(sy) ; y0 = clamp(y0,0,srcH-1)  (frac uses UNCLAMPED trunc)
+sx = i*xr ; x0 = trunc(sx) ; dx = sx-trunc(sx) ; x0 = clamp(x0,0,srcW-1)
+w00=(1-dy)(1-dx) w01=(1-dy)dx w10=dy(1-dx) w11=dy*dx
+topLeftByte = 3*(x0 + y0*srcW)         (never exceeds srcSize-1)
+botLeftByte = 3*(x0 + (y0+1)*srcW)
+TL = src[topLeftByte+c]
+TR = src[min(topLeftByte+c+3, srcSize-1)]   ; +3 = "x+1" on the FLAT byte offset,
+BL = src[min(botLeftByte+c,   srcSize-1)]   ;   clamped to srcSize-1 (NOT per-axis;
+BR = src[min(botLeftByte+c+3, srcSize-1)]   ;   right-edge pixels wrap into next row)
+out = (uchar)trunc( TL*w00 + TR*w01 + BL*w10 + BR*w11 )   ; accumulate TL,TR,BL,BR
+```
+The flat-offset neighbour addressing (no per-axis clamp of x+1 / y+1) is an exact
+quirk of this implementation that OpenCV would NOT reproduce — hence a hand port
+is required for byte-identity. Ported verbatim in `src/resize.cc`.
+
+### resizeJxlLimit — NOT PRESENT in either mac binary (fully assumed)
+`rabin2 -qz` of darwin_x64 and darwin_arm64 exports only `resizeJxl` (no
+`resizeJxlLimit`). The JS wrapper `index.js` calls
+`nodeAddon.resizeJxlLimit({buffer,width,height,limit})`, but the native symbol was
+never compiled into either shipping binary — so there is **no binary provenance**
+for its algorithm. The Linux port implements it as a faithful extension of
+resizeJxl: at a non-binding limit it is byte-identical to `resizeJxl`; when the
+encoded output exceeds `limit`, it shrinks the target box (×0.85 per step, same
+bilinear+encode pipeline per size) until the output fits. **assumed.**
+
+## clampSize formula — `clampSize` @0x12e7c (byte-identical port)
+
+`void clampSize(uint srcW, uint srcH, uint capW, uint capH, uint& outW, uint& outH)`.
+Aspect-preserving downscale into the (capW,capH) box, **truncation** at every step.
+
+```
+0x00012e80  cmp edi, edx ; ja 0x12e88          ; srcW > capW ?
+0x00012e84  cmp esi, ecx ; jbe 0x12ea5         ; srcW<=capW && srcH<=capH -> NO scale
+0x00012e88  seta r10b (srcH>capH); seta r11b (srcW>capW)
+0x00012e94  mov eax,esi ; imul eax,edi         ; area = srcW*srcH  (32-bit)
+0x00012e99  cmp eax,0x10000000 ; ja 0x12ead    ; area > 2^28 -> scale (overflow guard)
+0x00012ea0  and r11b,r10b ; jne 0x12ead        ; (srcW>capW && srcH>capH) -> scale
+0x00012ea5  mov [r8],edi ; mov [r9],esi        ; NO scale: outW=srcW, outH=srcH
+0x00012ead  cvtsi2sd xmm0,srcW ; cvtsi2sd xmm1,srcH
+0x00012ec2  divsd xmm0,xmm1                    ; xmm0 = srcW/srcH  (aspect)
+0x00012ec5  cvtsi2sd xmm2,capW ; divsd xmm2,xmm0 ; xmm2 = capW/aspect
+0x00012eca  cvttsd2si rax,xmm2                 ; hc = TRUNC(capW/aspect)
+0x00012ecf  cmp eax,ecx ; cmovb ecx,eax        ; outH = min_unsigned(hc, capH)
+0x00012ed4  mov [r9],ecx
+0x00012ed7  cvtsi2sd xmm1,outH ; mulsd xmm1,xmm0
+0x00012ee0  cvttsd2si rax,xmm1                 ; outW = TRUNC(outH*aspect)
+0x00012ee5  mov [r8],eax
+```
+So: **scale iff** `(srcW*srcH > 0x10000000)` **or** `(srcW>capW && srcH>capH)`;
+else pass through. When scaling:
+`aspect = (double)srcW/srcH; outH = min(trunc(capW/aspect), capH);
+outW = trunc(outH*aspect)`. Every float→int is `cvttsd2si` = **truncate toward
+zero** (no +0.5 rounding). A standalone C oracle reproduces the shipped dims:
+`1920x1080 →box 64 = 64x36`, `→box 800 = 800x450`, `602x400 →box 64 = 63x42`,
+`1280x592 →box 800 = 1280x592` (only width exceeds ⇒ no scale). Ported verbatim in
+`src/resize.cc`.
+
+---
+
+## Resize path — `resizePPFWithOpenCV`  (Task-8 decode/batch path — see correction above)
 
 Two overloads exist and are byte-identical in logic: signed-dims @0x8c8d and unsigned-dims
 @0xb578. Both implement a **two-stage** OpenCV downscale. `cv::resize(src, dst, Size, fx,
