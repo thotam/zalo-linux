@@ -37,10 +37,18 @@ constexpr float kJpegQualityScale    = 100.0f;  // certain
 constexpr int   kDefaultJpegQuality  = 90;      // assumed (verify functionally in Task 6)
 // tj3Set(h, TJPARAM_SUBSAMP=4, 2) @0x8260.
 constexpr int   kJpegSubsamp         = 2;       // TJSAMP_420   certain
-// tj3Set(h, TJPARAM_PROGRESSIVE=10, 1) @0x826e.
-constexpr int   kJpegProgressive     = 1;       // certain
+// tj3Set(h, TJPARAM_FASTDCT=10, 1) @0x826e. Ordinal 10 in turbojpeg.h is
+// TJPARAM_FASTDCT (fast integer DCT), NOT progressive (progressive is ordinal
+// 12). The mac sets fast DCT and emits a BASELINE JPEG; it never sets
+// TJPARAM_PROGRESSIVE. (Corrects a Task-2 RE mislabel — see RE-PARAMS.md.)
+constexpr int   kJpegFastDct         = 1;       // TJPARAM_FASTDCT   certain
 // tj3Compress8(..., pixelFormat=0, ...) @0x82a3 (r9d=0).
 constexpr int   kJpegPixelFormat     = 0;       // TJPF_RGB     certain
+// The mac ALSO embeds the decoded JXL's ICC profile via tj3SetICCProfile:
+// @0x8273 loads a {ptr,len} pair, @0x8285 calls tj3SetICCProfile before
+// tj3Compress8. The profile is fetched from the decoded JXL with
+// JxlDecoderGetICCProfileSize / JxlDecoderGetColorAsICCProfile
+// (JXL_COLOR_PROFILE_TARGET_DATA). See decode.cc / RE-PARAMS.md.
 
 // --- decode (decodeJpegXlOneShot @0x8417) / batch decode contract ---
 // Output JxlPixelFormat block @0x16a38 (same as encode): 3-channel UINT8.

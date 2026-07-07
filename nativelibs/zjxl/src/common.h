@@ -22,10 +22,13 @@ enum StatusCode { OK = 0, ERR_INPUT = 1, ERR_DECODE = 2, ERR_ENCODE = 3, ERR_RES
 // Shared codec helpers (defined in decode.cc). Non-static so Task 7/8 batch
 // decoders can reuse them. Signatures use only std/POD types so common.h needs
 // no libjxl/turbojpeg includes.
-// Decode a JXL codestream to interleaved RGB8; frees decoder on all paths.
+// Decode a JXL codestream to interleaved RGB8 plus its ICC profile (may be
+// empty); frees decoder on all paths.
 bool DecodeToRgb(const std::vector<uint8_t>& in, std::vector<uint8_t>& rgb,
-                 uint32_t& w, uint32_t& h);
-// RGB8 -> progressive 4:2:0 JPEG via turbojpeg tj3; `quality` is 1..100.
+                 uint32_t& w, uint32_t& h, std::vector<uint8_t>& icc);
+// RGB8 -> BASELINE 4:2:0 JPEG via turbojpeg tj3 (fast integer DCT); `quality`
+// is 1..100. `icc` is embedded (APP2) when non-empty, else omitted.
 bool RgbToJpeg(const std::vector<uint8_t>& rgb, uint32_t w, uint32_t h,
-               int quality, std::vector<uint8_t>& jpeg);
+               int quality, const std::vector<uint8_t>& icc,
+               std::vector<uint8_t>& jpeg);
 }  // namespace zjxl

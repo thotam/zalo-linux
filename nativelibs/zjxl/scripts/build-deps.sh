@@ -50,19 +50,21 @@ cmake --build "$SRC/brotli/b" -j"$JOBS"; cmake --install "$SRC/brotli/b"
 # verbatim. Strip it — the patchelf pass below sets $ORIGIN rpath instead.
 sed -i -E 's/ -R\$\{libdir\}//' "$PREFIX"/lib/pkgconfig/libbrotli*.pc
 
-# ---- libjpeg-turbo 3.0.2 (libjpeg.62 + libturbojpeg) ----
-clone https://github.com/libjpeg-turbo/libjpeg-turbo 3.0.2 ljt
+# ---- libjpeg-turbo 3.1.1 (libjpeg.62 + libturbojpeg) ----
+clone https://github.com/libjpeg-turbo/libjpeg-turbo 3.1.1 ljt
 cmake -S "$SRC/ljt" -B "$SRC/ljt/b" "${CMAKE_COMMON[@]}" -DWITH_TURBOJPEG=ON
 cmake --build "$SRC/ljt/b" -j"$JOBS"; cmake --install "$SRC/ljt/b"
 
 # ---- libjxl 0.9.3 (shared; uses the highway/brotli/jpeg above) ----
 clone https://github.com/libjxl/libjxl v0.9.3 libjxl
+# BUILD_TESTING=OFF: libjxl tests need hwy/tests/hwy_gtest.h, which we intentionally
+# did not build (Highway built with tests off). (Comment must live ABOVE the command:
+# a `#` between a `\` continuation and the next arg silently truncates the command.)
 cmake -S "$SRC/libjxl" -B "$SRC/libjxl/b" "${CMAKE_COMMON[@]}" \
   -DJPEGXL_ENABLE_PLUGINS=OFF -DJPEGXL_ENABLE_TOOLS=ON -DJPEGXL_ENABLE_BENCHMARK=OFF \
   -DJPEGXL_ENABLE_EXAMPLES=OFF -DJPEGXL_ENABLE_MANPAGES=OFF -DJPEGXL_ENABLE_JNI=OFF \
   -DJPEGXL_FORCE_SYSTEM_HWY=ON -DJPEGXL_FORCE_SYSTEM_BROTLI=ON \
   -DHWY_ROOT="$PREFIX" -DCMAKE_PREFIX_PATH="$PREFIX" \
-  # libjxl tests need hwy/tests/hwy_gtest.h, which we intentionally did not build (Highway built with tests off).
   -DBUILD_TESTING=OFF
 cmake --build "$SRC/libjxl/b" -j"$JOBS"; cmake --install "$SRC/libjxl/b"
 

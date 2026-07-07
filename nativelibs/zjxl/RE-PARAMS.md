@@ -97,7 +97,8 @@ Not present in the binary; set to 90 as a common visually-lossless default. **Mu
 confirmed functionally in Task 6** (or sourced from the higher-level Zalo caller). It only
 matters if a Linux caller ever omits quality; the mac callers always pass it.
 
-### kJpegSubsamp = 2 (TJSAMP_420), kJpegProgressive = 1 — certain
+### kJpegSubsamp = 2 (TJSAMP_420), kJpegFastDct = 1 — certain
+### ⚠️ CORRECTION to the original Task-2 RE — ordinal 10 is FASTDCT, not PROGRESSIVE
 `encodeJpegOneShotTurbo` @0x81fa. `tj3Set(h, param, value)` = (rdi, esi, rdx).
 ```
 0x00008249  push 3 ; pop rsi ; mov edx, r13d
@@ -107,8 +108,45 @@ matters if a Linux caller ever omits quality; the mac callers always pass it.
 0x00008260  call tj3Set                  ; TJPARAM_SUBSAMP(4) = 2 (TJSAMP_420)
 0x00008265  push 0xa ; pop rsi
 0x00008268  push 1 ; pop rdx
-0x0000826e  call tj3Set                  ; TJPARAM_PROGRESSIVE(10) = 1
+0x0000826e  call tj3Set                  ; TJPARAM_FASTDCT(10) = 1   <-- NOT progressive
 ```
+The ordinal pushed at @0x8265 is `0xa` = **10**. In `turbojpeg.h` (identical enum in
+libjpeg-turbo 3.0.2 and 3.1.1) the `TJPARAM` enum is: STOPONWARNING=0, BOTTOMUP=1,
+NOREALLOC=2, QUALITY=3, SUBSAMP=4, JPEGWIDTH=5, JPEGHEIGHT=6, PRECISION=7, COLORSPACE=8,
+FASTUPSAMPLE=9, **FASTDCT=10**, OPTIMIZE=11, **PROGRESSIVE=12**. So ordinal 10 is
+**TJPARAM_FASTDCT** (fast integer DCT), value **1** — the mac produces a **BASELINE**
+JPEG. It never touches TJPARAM_PROGRESSIVE (ordinal 12), which therefore stays 0.
+The original Task-2 RE mislabeled ordinal 10 as "progressive" (value 1) and the Linux
+port wrongly set `TJPARAM_PROGRESSIVE=1`, emitting a progressive JPEG (SOF2) instead of
+the mac's baseline (SOF0). `re_params.h` `kJpegProgressive` is replaced by
+`kJpegFastDct = 1`.
+
+### The mac ALSO embeds the decoded JXL's ICC profile — certain (was missing from Task-2 RE)
+Between the last `tj3Set` and `tj3Compress8`, `encodeJpegOneShotTurbo` calls
+`tj3SetICCProfile(h, iccBuf, iccSize)`:
+```
+0x00008273  ... load {ptr,len} pair (iccBuf, iccSize) from the decoded-image struct
+0x00008285  call tj3SetICCProfile        ; embed ICC -> APP2 (FF E2) marker
+```
+The profile is the one recovered during decode. The decode path subscribes
+`JXL_DEC_COLOR_ENCODING` and fetches the profile of the **decoded pixel data** with the
+libjxl imports `JxlDecoderGetICCProfileSize` / `JxlDecoderGetColorAsICCProfile`
+(target `JXL_COLOR_PROFILE_TARGET_DATA`). libjxl 0.9.3 signatures (from
+`<prefix>/include/jxl/decode.h`, this point release drops the `JxlPixelFormat*` arg):
+```
+JxlDecoderStatus JxlDecoderGetICCProfileSize(const JxlDecoder*, JxlColorProfileTarget, size_t*);
+JxlDecoderStatus JxlDecoderGetColorAsICCProfile(const JxlDecoder*, JxlColorProfileTarget, uint8_t*, size_t);
+```
+The Linux port (`src/decode.cc`) replicates this and passes `icc.data(), icc.size()` to
+`tj3SetICCProfile`, guarded on a non-empty profile (mirrors the mac's non-null {ptr,len}
+branch); when the sample carries no ICC the call is skipped and no APP2 marker is emitted.
+
+### libjpeg-turbo version — the mac bundles 3.1.1 (we now pin 3.1.1) — certain
+`strings app/native/.../libturbojpeg.0.dylib` → `libjpeg-turbo version 3.1.1`. For
+byte-identical JPEG output the Linux deps pin (`scripts/deps-hash.js` `PINS.libjpeg_turbo`)
+is bumped **3.0.2 → 3.1.1** (SONAME `libturbojpeg.so.0.4.0`). The turbojpeg entropy /
+Huffman tables and default quant behavior can differ across turbojpeg majors/minors, so
+matching 3.1.1 is required for bit-exact output.
 
 ### kJpegPixelFormat = 0 (TJPF_RGB) — certain
 `tj3Compress8(h, src, w, pitch, h, pixelFormat, &buf, &size)`; pixelFormat = r9d.
@@ -213,7 +251,9 @@ alpha for final confirmation.
 | kJpegQualityScale | 100.0f | certain |
 | kDefaultJpegQuality | 90 | **assumed** — verify in Task 6 |
 | kJpegSubsamp | 2 (TJSAMP_420) | certain |
-| kJpegProgressive | 1 | certain |
+| kJpegFastDct | 1 (TJPARAM_FASTDCT, ordinal 10 → BASELINE) | certain — corrects Task-2 "progressive" mislabel |
+| (ICC embed) | tj3SetICCProfile @0x8285, profile from decoded JXL | certain — was missing from Task-2 RE |
+| libjpeg-turbo pin | 3.1.1 (mac-bundled) | certain — bumped from 3.0.2 |
 | kJpegPixelFormat | 0 (TJPF_RGB) | certain |
 | kDecodeNumChannels | 3 | certain |
 | kDecodePixelDataType | 2 (UINT8) | certain |

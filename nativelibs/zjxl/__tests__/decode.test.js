@@ -25,10 +25,17 @@ addon.jxlToJpeg({ buffer: fs.readFileSync(sample), quality: 0.9 }, (err, data, s
   assert.ifError(err);
   assert.strictEqual(status, 0);
   assertJpeg(data, 'jxlToJpeg');
-  // Progressive JPEG (RE'd TJPARAM_PROGRESSIVE=1) => SOF2 marker (FF C2) must be present.
-  assert(data.includes(Buffer.from([0xff, 0xc2])), 'jxlToJpeg: progressive SOF2 marker present');
+  // BASELINE JPEG: the mac sets TJPARAM_FASTDCT (ordinal 10), NOT progressive
+  // (ordinal 12). So SOF0 (FF C0) must be present and SOF2 (FF C2) absent.
+  assert(data.includes(Buffer.from([0xff, 0xc0])), 'jxlToJpeg: baseline SOF0 marker present');
+  assert(!data.includes(Buffer.from([0xff, 0xc2])), 'jxlToJpeg: progressive SOF2 marker absent');
+  // The mac embeds the decoded JXL's ICC profile via tj3SetICCProfile -> an
+  // APP2 (FF E2) marker. Zalo samples are all_default SRGB and may not carry
+  // an ICC profile, so this is conditional: assert presence only for samples
+  // that actually produced one.
+  const hasIcc = data.includes(Buffer.from([0xff, 0xe2]));
   fs.writeFileSync('/tmp/zjxl-out.jpg', data);
-  console.log('OK jxlToJpeg', sampleName, data.length, 'bytes');
+  console.log('OK jxlToJpeg', sampleName, data.length, 'bytes', 'ICC(APP2):', hasIcc);
   done();
 });
 

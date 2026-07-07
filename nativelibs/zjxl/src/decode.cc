@@ -14,18 +14,22 @@
 //
 // Reproduces the mac binary's two RE'd helpers (see RE-PARAMS.md
 // "Decode -> JPEG path — jxlToJpeg -> encodeJpegOneShotTurbo"):
-//   * decode:  JxlDecoderSetImageOutBuffer with 3-channel JXL_TYPE_UINT8 (RGB8).
+//   * decode:  JxlDecoderSetImageOutBuffer with 3-channel JXL_TYPE_UINT8 (RGB8);
+//              also subscribes JXL_DEC_COLOR_ENCODING and pulls the decoded
+//              JXL's ICC profile (JXL_COLOR_PROFILE_TARGET_DATA).
 //   * encode:  turbojpeg tj3 one-shot — tj3Init(TJINIT_COMPRESS),
-//              tj3Set(QUALITY), tj3Set(SUBSAMP=TJSAMP_420), tj3Set(PROGRESSIVE=1),
-//              tj3Compress8(..., TJPF_RGB, ...).
+//              tj3Set(QUALITY), tj3Set(SUBSAMP=TJSAMP_420), tj3Set(FASTDCT=1),
+//              tj3SetICCProfile(icc), tj3Compress8(..., TJPF_RGB, ...).
+//              Baseline JPEG (fast integer DCT); the mac never sets PROGRESSIVE.
 // Output is intended to be bit-identical to the mac binary given the pinned
-// libjxl 0.9.3 + libjpeg-turbo 3.x.
+// libjxl 0.9.3 + libjpeg-turbo 3.1.1.
 namespace zjxl {
 
-// Decode a JXL codestream to interleaved RGB8. Returns false on any failure.
+// Decode a JXL codestream to interleaved RGB8, plus the image's ICC profile
+// (target = decoded-data profile). Returns false on any failure.
 // Frees the decoder and the parallel runner on every path.
 bool DecodeToRgb(const std::vector<uint8_t>& in, std::vector<uint8_t>& rgb,
-                 uint32_t& w, uint32_t& h) {
+                 uint32_t& w, uint32_t& h, std::vector<uint8_t>& icc) {
   JxlDecoder* dec = JxlDecoderCreate(nullptr);
   if (!dec) return false;
   void* runner = JxlResizableParallelRunnerCreate(nullptr);
@@ -35,8 +39,11 @@ bool DecodeToRgb(const std::vector<uint8_t>& in, std::vector<uint8_t>& rgb,
   do {
     if (JxlDecoderSetParallelRunner(dec, JxlResizableParallelRunner, runner) !=
         JXL_DEC_SUCCESS) break;
-    if (JxlDecoderSubscribeEvents(dec, JXL_DEC_BASIC_INFO | JXL_DEC_FULL_IMAGE) !=
-        JXL_DEC_SUCCESS) break;
+    // Also subscribe COLOR_ENCODING so we can pull the decoded JXL's ICC
+    // profile and embed it in the JPEG (mac: tj3SetICCProfile @0x8285).
+    if (JxlDecoderSubscribeEvents(
+            dec, JXL_DEC_BASIC_INFO | JXL_DEC_COLOR_ENCODING |
+                     JXL_DEC_FULL_IMAGE) != JXL_DEC_SUCCESS) break;
     if (JxlDecoderSetInput(dec, in.data(), in.size()) != JXL_DEC_SUCCESS) break;
     JxlDecoderCloseInput(dec);
 
@@ -56,6 +63,25 @@ bool DecodeToRgb(const std::vector<uint8_t>& in, std::vector<uint8_t>& rgb,
         h = bi.ysize;
         JxlResizableParallelRunnerSetThreads(
             runner, JxlResizableParallelRunnerSuggestThreads(w, h));
+      } else if (st == JXL_DEC_COLOR_ENCODING) {
+        // Pull the ICC profile of the DECODED pixel data (target = DATA),
+        // matching the mac path which embeds it via tj3SetICCProfile. A
+        // missing/zero-size profile is non-fatal: icc stays empty and the
+        // encoder simply omits the APP2 marker (mac's SetICCProfile is guarded
+        // on a non-empty {ptr,len}). libjxl 0.9.3 signatures (jxl/decode.h):
+        //   JxlDecoderGetICCProfileSize(const JxlDecoder*, JxlColorProfileTarget, size_t*)
+        //   JxlDecoderGetColorAsICCProfile(const JxlDecoder*, JxlColorProfileTarget, uint8_t*, size_t)
+        size_t icc_size = 0;
+        if (JxlDecoderGetICCProfileSize(dec, JXL_COLOR_PROFILE_TARGET_DATA,
+                                        &icc_size) == JXL_DEC_SUCCESS &&
+            icc_size > 0) {
+          icc.resize(icc_size);
+          if (JxlDecoderGetColorAsICCProfile(dec, JXL_COLOR_PROFILE_TARGET_DATA,
+                                             icc.data(), icc.size()) !=
+              JXL_DEC_SUCCESS) {
+            icc.clear();  // couldn't materialize it -> skip embed
+          }
+        }
       } else if (st == JXL_DEC_NEED_IMAGE_OUT_BUFFER) {
         size_t need = 0;
         if (JxlDecoderImageOutBufferSize(dec, &fmt, &need) != JXL_DEC_SUCCESS) break;
@@ -74,11 +100,14 @@ bool DecodeToRgb(const std::vector<uint8_t>& in, std::vector<uint8_t>& rgb,
   return ok && !rgb.empty();
 }
 
-// RGB8 -> progressive 4:2:0 JPEG via the turbojpeg tj3 one-shot API, matching
+// RGB8 -> BASELINE 4:2:0 JPEG via the turbojpeg tj3 one-shot API, matching
 // encodeJpegOneShotTurbo @0x81fa. `quality` is the already-scaled 1..100 int.
+// `icc` (may be empty) is embedded when non-empty (APP2 marker), matching the
+// mac's tj3SetICCProfile @0x8285.
 // Frees the tj handle and the output buffer on every path.
 bool RgbToJpeg(const std::vector<uint8_t>& rgb, uint32_t w, uint32_t h,
-               int quality, std::vector<uint8_t>& jpeg) {
+               int quality, const std::vector<uint8_t>& icc,
+               std::vector<uint8_t>& jpeg) {
   tjhandle h_tj = tj3Init(TJINIT_COMPRESS);
   if (!h_tj) return false;
 
@@ -88,14 +117,28 @@ bool RgbToJpeg(const std::vector<uint8_t>& rgb, uint32_t w, uint32_t h,
     if (tj3Set(h_tj, TJPARAM_QUALITY, quality) != 0) break;
     // tj3Set(h, TJPARAM_SUBSAMP=4, TJSAMP_420=2) @0x8260
     if (tj3Set(h_tj, TJPARAM_SUBSAMP, zjxl_re::kJpegSubsamp) != 0) break;
-    // tj3Set(h, TJPARAM_PROGRESSIVE=10, 1)       @0x826e
-    if (tj3Set(h_tj, TJPARAM_PROGRESSIVE, zjxl_re::kJpegProgressive) != 0) break;
+    // tj3Set(h, TJPARAM_FASTDCT=10, 1)           @0x826e
+    // Ordinal 10 == TJPARAM_FASTDCT (fast integer DCT) -> BASELINE JPEG. The
+    // mac never sets TJPARAM_PROGRESSIVE (ordinal 12); the old code's
+    // "progressive" label at ordinal 10 was a Task-2 RE mislabel.
+    if (tj3Set(h_tj, TJPARAM_FASTDCT, zjxl_re::kJpegFastDct) != 0) break;
+
+    // tj3SetICCProfile(h, icc, iccSize) @0x8285 — embed the decoded JXL's ICC
+    // profile. Guarded on a non-empty profile (mirrors the mac's {ptr,len}
+    // branch). tj3SetICCProfile is a no-fail-tolerant convenience; a failure
+    // here would only mean the marker is dropped, so treat it as fatal to keep
+    // output deterministic.
+    if (!icc.empty()) {
+      if (tj3SetICCProfile(h_tj, const_cast<unsigned char*>(icc.data()),
+                           icc.size()) != 0) break;
+    }
 
     unsigned char* out = nullptr;
     size_t outSize = 0;
     // tj3Compress8(h, src, w, pitch=0, h, TJPF_RGB=0, &out, &outSize) @0x82a9
     int rc = tj3Compress8(h_tj, rgb.data(), static_cast<int>(w), /*pitch=*/0,
-                          static_cast<int>(h), TJPF_RGB, &out, &outSize);
+                          static_cast<int>(h), zjxl_re::kJpegPixelFormat, &out,
+                          &outSize);
     if (rc == 0 && out != nullptr) {
       jpeg.assign(out, out + outSize);
       ok = true;
@@ -137,13 +180,13 @@ class DecodeWorker : public Napi::AsyncWorker {
 
   void Execute() override {
     uint32_t w = 0, h = 0;
-    std::vector<uint8_t> rgb;
-    if (!DecodeToRgb(in_, rgb, w, h)) {
+    std::vector<uint8_t> rgb, icc;
+    if (!DecodeToRgb(in_, rgb, w, h, icc)) {
       status_ = ERR_DECODE;
       SetError("jxlToJpeg: decode failed");
       return;
     }
-    if (!RgbToJpeg(rgb, w, h, quality_, jpeg_)) {
+    if (!RgbToJpeg(rgb, w, h, quality_, icc, jpeg_)) {
       status_ = ERR_ENCODE;
       SetError("jxlToJpeg: jpeg encode failed");
       return;

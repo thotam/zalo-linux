@@ -7,7 +7,7 @@ const PINS = {
   libjxl: '0.9.3',
   highway: '1.0.7',
   brotli: '1.0.9',
-  libjpeg_turbo: '3.0.2',
+  libjpeg_turbo: '3.1.1',
   opencv: '4.12.0',
   flags: 'x64-relwithdebinfo-cxx17-shared-jxl-static-hwy',
   abi: 1, // bump to force a rebuild without changing a version
@@ -15,5 +15,7 @@ const PINS = {
 
 const hash = crypto.createHash('sha256').update(JSON.stringify(PINS)).digest('hex').slice(0, 12);
 const prefix = path.join(__dirname, '..', '.deps-prefix', hash);
-process.stdout.write(prefix);
+// Only emit when invoked as a CLI (build-deps.sh runs `node deps-hash.js`);
+// requiring this for PINS/prefix must not pollute the requirer's stdout.
+if (require.main === module) process.stdout.write(prefix);
 module.exports = { PINS, prefix, hash };
