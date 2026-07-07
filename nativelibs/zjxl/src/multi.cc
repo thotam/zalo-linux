@@ -345,8 +345,8 @@ static Napi::Value JxlDecompressMulti(const Napi::CallbackInfo& info) {
   if (opts.Has("quality")) {
     Napi::Value v = opts.Get("quality");
     if (v.IsNumber()) {
-      quality = static_cast<int>(v.As<Napi::Number>().FloatValue() *
-                                 zjxl_re::kJpegQualityScale);
+      quality = static_cast<uint8_t>(static_cast<int>(v.As<Napi::Number>().FloatValue() *
+                                                       zjxl_re::kJpegQualityScale));
     }
   }
 

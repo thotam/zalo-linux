@@ -13,6 +13,10 @@ static Napi::Value GetJxlInfo(const Napi::CallbackInfo& info) {
   catch (const Napi::Error& e) { cb.Call({e.Value(), env.Null(), Napi::Number::New(env, ERR_INPUT)}); return env.Undefined(); }
 
   JxlDecoder* dec = JxlDecoderCreate(nullptr);
+  if (!dec) {
+    cb.Call({Napi::String::New(env, "getJxlInfo: decoder alloc failed"), env.Null(), Napi::Number::New(env, ERR_DECODE)});
+    return env.Undefined();
+  }
   JxlDecoderSubscribeEvents(dec, JXL_DEC_BASIC_INFO);
   JxlDecoderSetInput(dec, in.data(), in.size());
   JxlDecoderCloseInput(dec);
