@@ -92,6 +92,15 @@ function predictDims(sw, sh, tw, th) {
   assert.strictEqual(d0.outputPath, '', 'default: empty outputPath');
   console.log(`default -> 1 JPEG ${d0.width}x${d0.height} (${d0.size} bytes)`);
 
+  // --- 1b: explicit empty tasks array => 0 outputs (mac @0x5fc7: the default
+  // task is synthesized only when the "tasks" KEY is absent, not merely when
+  // the parsed array is empty) ---
+  const emptyTasks = await multi({ buffer: jxl, tasks: [] });
+  assert.strictEqual(emptyTasks.status_code, SUCCESS_STATUS, 'emptyTasks: SUCCESS');
+  assert(Array.isArray(emptyTasks.data), 'emptyTasks: data is array');
+  assert.strictEqual(emptyTasks.data.length, 0, 'emptyTasks: tasks:[] yields 0 outputs');
+  console.log('emptyTasks -> tasks:[] yields 0 outputs (tasks-key-absent default confirmed)');
+
   // --- 2: batch of resize tasks (exercise two-stage) ---
   const targets = [64, 256, 800];
   const res = await multi({

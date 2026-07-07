@@ -19,8 +19,10 @@ function assertJpeg(data, label) {
 let pending = 2;
 function done() { if (--pending === 0) console.log('ALL DECODE TESTS PASSED'); }
 
-// RE'd contract: JS "quality" is a 0..1 float scaled by 100 in native (kJpegQualityScale).
-// Passing 0.9 -> turbojpeg quality 90. (Do NOT pass 90 here; that would become 9000.)
+// RE'd contract: JS "quality" is a 0..1 float scaled by 100 in native (kJpegQualityScale),
+// via mulss + cvttss2si truncation (no rounding, no [1,100] clamp) — matches the mac
+// jxlToJpeg @0x519b-0x51c2 bit-for-bit. Passing 0.9 -> float 0.9f * 100.0f = 89.999...,
+// truncated -> turbojpeg quality 89 (not 90). (Do NOT pass 90 here; that would become 9000.)
 addon.jxlToJpeg({ buffer: fs.readFileSync(sample), quality: 0.9 }, (err, data, status) => {
   assert.ifError(err);
   assert.strictEqual(status, 0);

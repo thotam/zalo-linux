@@ -150,27 +150,21 @@ bool RgbToJpeg(const std::vector<uint8_t>& rgb, uint32_t w, uint32_t h,
   return ok;
 }
 
-// Convert the JS "quality" option (0..1 float) to a turbojpeg 1..100 int.
-// RE-PARAMS.md "Quality is caller-supplied; kJpegQualityScale = 100.0f":
-// jxlToJpeg reads "quality" as a float and does mulss by 100.0 then cvttss2si.
-// If "quality" is absent/NaN we fall back to kDefaultJpegQuality (already a
-// 0..100 value — the one assumed param; mac callers always pass quality).
+// Convert the JS "quality" option (0..1 float) to a turbojpeg quality byte.
+// mac jxlToJpeg @0x519b-0x51c2: FloatValue() -> mulss xmm0, 100.0f ->
+// cvttss2si eax (truncate toward zero, NOT rounded) -> movzx r8d, al (low
+// byte). No [1,100] clamp on the mac side, so mirror that bit-for-bit here:
+// float mul + cvttss2si truncate + movzx al (no rounding, no clamp).
+// If "quality" is absent/NaN we fall back to kDefaultJpegQuality (Linux-only
+// fallback; mac callers always pass quality).
 static int ResolveQuality(const Napi::Object& opts) {
   Napi::Value v = opts.Get("quality");
-  int q;
-  if (v.IsNumber()) {
-    double quality01 = v.As<Napi::Number>().DoubleValue();
-    if (std::isnan(quality01)) {
-      q = zjxl_re::kDefaultJpegQuality;
-    } else {
-      q = static_cast<int>(std::lround(quality01 * zjxl_re::kJpegQualityScale));
-    }
-  } else {
-    q = zjxl_re::kDefaultJpegQuality;
-  }
-  if (q < 1) q = 1;
-  if (q > 100) q = 100;
-  return q;
+  if (!v.IsNumber()) return zjxl_re::kDefaultJpegQuality;
+  float quality01 = v.As<Napi::Number>().FloatValue();  // FloatValue, not DoubleValue
+  if (std::isnan(quality01)) return zjxl_re::kDefaultJpegQuality;
+  // mulss by 100.0f then cvttss2si (truncate), then movzx al (low byte).
+  int scaled = static_cast<int>(quality01 * zjxl_re::kJpegQualityScale);
+  return static_cast<uint8_t>(scaled);
 }
 
 class DecodeWorker : public Napi::AsyncWorker {

@@ -350,10 +350,14 @@ static Napi::Value JxlDecompressMulti(const Napi::CallbackInfo& info) {
     }
   }
 
-  // tasks: array of resize/encode requests. Absent => a single default task
-  // (all dims -1 => source-size encode), matching the mac @0x6204.
+  // tasks: array of resize/encode requests. Absent KEY => a single default
+  // task (all dims -1 => source-size encode), matching the mac @0x5fc7. An
+  // explicit empty array (tasks: []) must iterate zero times and yield an
+  // empty output array — the default is synthesized only when the key is
+  // absent, not merely when the parsed vector is empty.
+  bool hasTasksKey = opts.Has("tasks");
   std::vector<MultiTask> tasks;
-  if (opts.Has("tasks") && opts.Get("tasks").IsArray()) {
+  if (hasTasksKey && opts.Get("tasks").IsArray()) {
     Napi::Array a = opts.Get("tasks").As<Napi::Array>();
     for (uint32_t i = 0; i < a.Length(); ++i) {
       Napi::Value tv = a.Get(i);
@@ -369,7 +373,7 @@ static Napi::Value JxlDecompressMulti(const Napi::CallbackInfo& info) {
       tasks.push_back(std::move(t));
     }
   }
-  if (tasks.empty()) tasks.emplace_back();  // one default task (source-size)
+  if (!hasTasksKey) tasks.emplace_back();  // default task only when the key is absent (mac @0x5fc7)
 
   (new MultiWorker(cb, std::move(buffer), std::move(localPath), std::move(tasks),
                    quality))
