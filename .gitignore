@@ -28,3 +28,6 @@ temp/
 # Editor / local
 .claude/
 .DS_Store
+
+# Local scratch — real Zalo JXL samples used for tests (personal images, never commit)
+scratchpad/
