@@ -14,7 +14,7 @@ if [ -f "$PREFIX/.done" ]; then
   exit 0
 fi
 
-for tool in cmake nasm ninja git curl; do
+for tool in cmake nasm ninja git curl patchelf; do
   command -v "$tool" >/dev/null || { echo "missing build tool: $tool" >&2; exit 1; }
 done
 
@@ -22,6 +22,7 @@ mkdir -p "$PREFIX" "$SRC"
 export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
 CMAKE_COMMON=(-G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX="$PREFIX"
   -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DBUILD_SHARED_LIBS=ON
+  # CMake 4.2 refuses projects whose cmake_minimum_required predates 3.5; this floor keeps them configurable.
   -DCMAKE_POLICY_VERSION_MINIMUM=3.5
   -DCMAKE_INSTALL_RPATH="$PREFIX/lib" -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON
   -DCMAKE_EXE_LINKER_FLAGS="-Wl,-rpath-link,$PREFIX/lib"
@@ -33,6 +34,7 @@ clone() { # repo tag dir
 }
 
 # ---- Highway 1.0.7 (static; libjxl SIMD dep) ----
+# Highway's real tag is 1.0.7 (no leading v).
 clone https://github.com/google/highway 1.0.7 highway
 cmake -S "$SRC/highway" -B "$SRC/highway/b" "${CMAKE_COMMON[@]}" \
   -DBUILD_SHARED_LIBS=OFF -DHWY_ENABLE_TESTS=OFF -DHWY_ENABLE_EXAMPLES=OFF -DHWY_ENABLE_CONTRIB=OFF
@@ -60,6 +62,7 @@ cmake -S "$SRC/libjxl" -B "$SRC/libjxl/b" "${CMAKE_COMMON[@]}" \
   -DJPEGXL_ENABLE_EXAMPLES=OFF -DJPEGXL_ENABLE_MANPAGES=OFF -DJPEGXL_ENABLE_JNI=OFF \
   -DJPEGXL_FORCE_SYSTEM_HWY=ON -DJPEGXL_FORCE_SYSTEM_BROTLI=ON \
   -DHWY_ROOT="$PREFIX" -DCMAKE_PREFIX_PATH="$PREFIX" \
+  # libjxl tests need hwy/tests/hwy_gtest.h, which we intentionally did not build (Highway built with tests off).
   -DBUILD_TESTING=OFF
 cmake --build "$SRC/libjxl/b" -j"$JOBS"; cmake --install "$SRC/libjxl/b"
 
