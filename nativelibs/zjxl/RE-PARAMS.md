@@ -226,3 +226,55 @@ alpha for final confirmation.
 **20 certain, 1 assumed** (`kDefaultJpegQuality` — no binary/JS provenance; caller always
 supplies quality, so it only matters as a Linux-side fallback; confirm functionally in
 Task 6).
+
+---
+
+## getJxlInfo output keys
+
+**Certain — disassembled `GetJxlInfoAsyncWorker::OnOK()`** (mac x86_64
+`app/native/nativelibs/zjxl/build/darwin_x64/jxl.node`, symbol
+`__ZN21GetJxlInfoAsyncWorker4OnOKEv` @0x40b0):
+
+```
+0x00004109  lea rsi, [str.width]       ; "width"    @0x1548d
+0x00004117  call Napi::Object::Set(..., "width", Number(worker+0x88))
+0x0000413b  lea rsi, [str.height]      ; "height"   @0x15493
+0x00004149  call Napi::Object::Set(..., "height", Number(worker+0x8c))
+0x0000416d  lea rsi, [str.orientation] ; "orientation" @0x1549a
+0x0000417b  call Napi::Object::Set(..., "orientation", Number(worker+0x90))
+```
+
+The returned object has **exactly three keys: `width`, `height`, `orientation`** — no
+`hasAlpha` / `bitsPerSample` (those were the Task-4-brief placeholder default, now
+corrected). `Execute()` (`GetJxlInfoAsyncWorker::Execute()` @0x4012) confirms the field
+mapping by tracing the outputs of the internal helper
+`getJxlInfo(const uchar*, size_t, uint32_t*, uint32_t*, uint32_t*, int&)`:
+
+```
+0x00004041  call getJxlInfo(data, size, &var_1c, &var_18, &var_14, &worker+0xa0)
+0x0000404a  mov eax, [var_1c]; mov [worker+0x88], eax   ; out param #1 -> width
+0x00004053  mov eax, [var_18]; mov [worker+0x8c], eax   ; out param #2 -> height
+0x0000405c  mov eax, [var_14]; mov [worker+0x90], eax   ; out param #3 -> orientation
+```
+
+so the helper's 3rd `uint32_t*` out-param is orientation, and its `int&` out-param
+(`worker+0xa0`) is *not* part of the returned object — `OnOK` passes it straight through
+as the callback's 3rd argument (`status_code`), i.e. the native helper computes the
+status code directly.
+
+Linux implementation (`src/info.cc`) maps `JxlBasicInfo` 1:1: `bi.xsize` → `width`,
+`bi.ysize` → `height`, `bi.orientation` → `orientation` (libjxl `JxlOrientation` enum,
+1 = identity/no rotation, matching EXIF orientation 1-8).
+
+### jxlinfo cross-check — now available, closes Task 2's deferred item
+
+Task 1's pinned `jxlinfo` is present at
+`nativelibs/zjxl/.deps-prefix/f28d936cd8cb/bin/jxlinfo`. Confirmed against
+`scratchpad/jxl-samples/z7974466650218_d9ca89985e4f111a92d52b084240a65a.jxl`:
+
+```
+$ LD_LIBRARY_PATH=<prefix>/lib <prefix>/bin/jxlinfo <sample>
+JPEG XL image, 1920x1080, lossy, 8-bit RGB
+```
+
+matches `getJxlInfo`'s `{width: 1920, height: 1080}` on the same file exactly.
