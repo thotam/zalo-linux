@@ -18,4 +18,14 @@ inline int GetInt(const Napi::Object& opts, const char* key, int dflt) {
 }
 // Status codes returned to JS as the callback's 3rd arg.
 enum StatusCode { OK = 0, ERR_INPUT = 1, ERR_DECODE = 2, ERR_ENCODE = 3, ERR_RESIZE = 4 };
+
+// Shared codec helpers (defined in decode.cc). Non-static so Task 7/8 batch
+// decoders can reuse them. Signatures use only std/POD types so common.h needs
+// no libjxl/turbojpeg includes.
+// Decode a JXL codestream to interleaved RGB8; frees decoder on all paths.
+bool DecodeToRgb(const std::vector<uint8_t>& in, std::vector<uint8_t>& rgb,
+                 uint32_t& w, uint32_t& h);
+// RGB8 -> progressive 4:2:0 JPEG via turbojpeg tj3; `quality` is 1..100.
+bool RgbToJpeg(const std::vector<uint8_t>& rgb, uint32_t w, uint32_t h,
+               int quality, std::vector<uint8_t>& jpeg);
 }  // namespace zjxl
