@@ -40,6 +40,10 @@ const DONE_MARKER = 'fa-Lock_24_Line btn titlebar__menu__btn';
 // The titlebar platform class (DARWIN on the mac build).
 const DARWIN_CLASS = '?" locked ":"")+"DARWIN"';
 const WIN32_CLASS = '?" locked ":"")+"WIN32"';
+// How many pc-dist bundles host the title bar in the current Zalo build (26.6.11).
+// Asserted so a bundle split/merge that changes this count fails loud (even a
+// legit reduction needs review — bump this after verifying the new layout).
+const EXPECTED_HOSTS = 3;
 
 function listBundles(dir) {
   const out = [];
@@ -113,8 +117,11 @@ async function main() {
     else already++;
   }
 
-  if (hosts === 0) {
-    throw new Error('patch-titlebar-controls: no bundle contains the title bar component — pc-dist layout changed.');
+  if (hosts !== EXPECTED_HOSTS) {
+    throw new Error(
+      `patch-titlebar-controls: expected ${EXPECTED_HOSTS} title-bar bundles, found ${hosts} — ` +
+      `pc-dist layout changed (bundle split/merge). Re-verify and update EXPECTED_HOSTS.`
+    );
   }
   if (patched === 0 && already === 0) {
     throw new Error('patch-titlebar-controls: found the title bar but patched nothing — anchor drift.');

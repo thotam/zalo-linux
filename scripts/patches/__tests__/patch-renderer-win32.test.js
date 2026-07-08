@@ -17,7 +17,11 @@ fs.copyFileSync(path.join(__dirname, '..', 'patch-renderer-win32.js'), path.join
 // The copied patch file does require('fs-extra'); give it a node_modules to resolve against.
 fs.symlinkSync(path.join(__dirname, '..', '..', '..', 'node_modules'), path.join(repo, 'node_modules'), 'dir');
 
-const sample = 'a({platform:"DARWIN",v:1});getClientType(){return 23}getClientType(){return 23}"DARWIN".toLowerCase();OS:{DARWIN:"DARWIN"}';
+// Match the real 26.6.11 occurrence counts asserted by the patch: 2 platform
+// props + 6 getClientType. The cosmetic "DARWIN" uses must stay untouched.
+const sample = 'a({platform:"DARWIN",v:1});b({platform:"DARWIN",v:2});' +
+  'getClientType(){return 23}'.repeat(6) +
+  '"DARWIN".toLowerCase();OS:{DARWIN:"DARWIN"}';
 const file = path.join(pcDist, 'main-startup.abcdef.js');
 fs.writeFileSync(file, sample, 'utf8');
 
@@ -28,7 +32,7 @@ const { main } = require(path.join(patchDir, 'patch-renderer-win32.js'));
   let out = fs.readFileSync(file, 'utf8');
   assert(out.includes('platform:"WIN32"'), 'platform prop replaced');
   assert(!out.includes('platform:"DARWIN"'), 'no platform:"DARWIN" left');
-  assert.strictEqual(out.split('getClientType(){return 24}').length - 1, 2, 'both getClientType replaced');
+  assert.strictEqual(out.split('getClientType(){return 24}').length - 1, 6, 'all getClientType replaced');
   assert(!out.includes('getClientType(){return 23}'), 'no return 23 left');
   // Cosmetic DARWIN untouched:
   assert(out.includes('"DARWIN".toLowerCase()'), 'cosmetic className untouched');
