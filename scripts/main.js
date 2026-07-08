@@ -18,6 +18,10 @@ async function main() {
       // 3. Patches, in fixed order. Each is idempotent; critical ones throw on
       //    pattern drift (fail loud when Zalo bumps version).
       //      platform-id   : main-dist -> client-type LINUX 25 -> 24 (unlocks E2EE sync)
+      //      relaunch-reveal: main-dist -> in the second-instance reveal branch, force a
+      //                      native reconfigure after show() so a maximized frameless
+      //                      window re-composites on relaunch (XWayland blanks otherwise).
+      //                      No single-instance lock: Zalo self-manages via its socket.
       //      renderer-win32: pc-dist   -> DARWIN->WIN32 + getClientType 23->24
       //                      (renderer draws native win32 min/max/close on frameless win)
       //      sqlite3       : build SQLCipher .node -> napi-v6-linux-x64 slot
@@ -44,6 +48,7 @@ async function main() {
 
       logger.step('Applying patches');
       await require('./patches/patch-platform-id.js').main();
+      await require('./patches/patch-relaunch-reveal.js').main();
       await require('./patches/patch-renderer-win32.js').main();
       await require('./patches/patch-titlebar-controls.js').main();
       await require('./patches/patch-media-viewer-controls.js').main();
