@@ -94,8 +94,13 @@ cmake --build "$SRC/expat/b" -j"$JOBS"; cmake --install "$SRC/expat/b"
 # --libdir=lib: on Debian/Ubuntu meson defaults libdir to the multiarch triplet
 # (lib/x86_64-linux-gnu), which our PKG_CONFIG_PATH/CMAKE_PREFIX_PATH don't scan.
 clone https://gitlab.gnome.org/GNOME/glib.git 2.78.4 glib
+# Force a clean build dir: a persisted deps-src build dir can retain an older
+# --default-library=static config, and meson's --reconfigure fallback silently
+# keeps it, leaving glib statically baked into libvips. rm guarantees the shared
+# config applies.
+rm -rf "$SRC/glib/b"
 meson setup "$SRC/glib/b" "$SRC/glib" --prefix="$PREFIX" --libdir=lib --buildtype=release --default-library=shared \
-  -Dtests=false -Dnls=disabled -Dlibmount=disabled -Dselinux=disabled || meson setup --reconfigure "$SRC/glib/b" "$SRC/glib" --prefix="$PREFIX" --libdir=lib --default-library=shared
+  -Dtests=false -Dnls=disabled -Dlibmount=disabled -Dselinux=disabled
 ninja -C "$SRC/glib/b" -j"$JOBS"; ninja -C "$SRC/glib/b" install
 
 # ---- libvips 8.14.2 (meson; shared libvips-cpp, codecs static) ----
@@ -115,13 +120,19 @@ ninja -C "$SRC/glib/b" -j"$JOBS"; ninja -C "$SRC/glib/b" install
 # touching glib itself; libvips 8.14 doesn't use any 2.78-only API anyway.
 GLIB_COMPAT_ARGS="-DGLIB_VERSION_MIN_REQUIRED=GLIB_VERSION_2_76 -DGLIB_VERSION_MAX_ALLOWED=GLIB_VERSION_2_76"
 clone https://github.com/libvips/libvips v8.14.2 libvips
+# Force a clean build dir so the full flag set (incl. --default-library=shared and
+# the codec toggles) always applies — a stale libvips/b from a previous prefix
+# would otherwise keep linking glib statically (the --reconfigure fallback dropped
+# these flags). libvips must dynamic-link glib so a single glib copy is used at
+# runtime (system glib under Electron, bundled under plain Node) — no double
+# gobject type registration -> no SIGABRT.
+rm -rf "$SRC/libvips/b"
 meson setup "$SRC/libvips/b" "$SRC/libvips" --prefix="$PREFIX" --libdir=lib --buildtype=release \
   --default-library=shared -Ddeprecated=false -Dexamples=false -Dcplusplus=true -Dnsgif=true \
   -Dintrospection=false -Dvapi=false -Dmodules=disabled \
   -Djpeg=enabled -Dpng=enabled -Dspng=enabled -Dwebp=enabled \
   -Djpeg-xl=disabled -Dheif=disabled -Dmagick=disabled -Dpdfium=disabled -Dpoppler=disabled \
-  -Dc_args="$GLIB_COMPAT_ARGS" -Dcpp_args="$GLIB_COMPAT_ARGS" \
-  || meson setup --reconfigure "$SRC/libvips/b" "$SRC/libvips" --prefix="$PREFIX" --libdir=lib
+  -Dc_args="$GLIB_COMPAT_ARGS" -Dcpp_args="$GLIB_COMPAT_ARGS"
 ninja -C "$SRC/libvips/b" -j"$JOBS"; ninja -C "$SRC/libvips/b" install
 
 if [ -d "$PREFIX/lib64" ]; then cp -a "$PREFIX/lib64/." "$PREFIX/lib/"; fi
