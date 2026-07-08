@@ -1,8 +1,10 @@
 # Roadmap — Reverse-engineering the remaining native modules (Linux)
 
-Trạng thái hiện tại của `app/native/nativelibs/*`. **3 module đã port** (build/relink cho Linux); **8 module proprietary** còn lại chỉ có prebuilt darwin/win → hiện **guard/stub** (không crash) và cần RE để chạy thật trên Linux.
+Trạng thái hiện tại của `app/native/nativelibs/*`. **4 module đã port** (build/relink cho Linux); **7 module proprietary** còn lại chỉ có prebuilt darwin/win → hiện **guard/stub** (không crash) và cần RE để chạy thật trên Linux.
 
 > "RE" ở đây = **reimplement JS API trên OSS lib tương đương** (không có source gốc để build). API surface nhỏ và đã biết chính xác (tên hàm + shape tham số lấy từ `index.js`), nên khả thi. Với module Rust (NAPI-RS) có thể reimplement JS hoặc dựng lại addon Rust.
+
+> **Công cụ version-drift** (`nativelibs/scripts/check-native-versions.js`, baseline `nativelibs/expected-versions.json`): đọc version thư viện thật từ binary macOS, cảnh báo khi bản Zalo mới đổi version để cập nhật pin. Chạy tự động (non-fatal) mỗi `npm run setup`. Nó cũng đã phát hiện **zimage bundle libvips 59.2.0** (dùng cho RE zimage bên dưới).
 
 ---
 
@@ -13,8 +15,8 @@ Trạng thái hiện tại của `app/native/nativelibs/*`. **3 module đã port
 | **sqlite3** | DB SQLCipher | mapbox sqlite3 + SQLCipher | ✅ DONE (build) | — | — |
 | **db-cross-v4** | Giải mã backup E2EE | clean-room C++ | ✅ DONE (build) | — | — |
 | **zfile** | Disk info / file ops | glibc statvfs | ✅ DONE (build+wrapper) | — | — |
-| **zjxl** | Codec **JPEG-XL** | libjxl+OpenCV+turbojpeg | ❌ `{error:'not support'}` | `decodeToJpeg, bitmapToJxl, jxlToRgb, resizeJxl` | **P1** |
-| **zimage** | Thumbnail/resize | **libvips** (sharp) | ❌ `{error:NOT_SUPPORT}` | `thumbnail, resizeQA` | **P1** |
+| **zjxl** | Codec **JPEG-XL** | libjxl 0.9.3+OpenCV 4.12+turbojpeg 3.1.1 | ✅ **DONE (native, byte-identical)** | `getJxlInfo, decodeToJpeg(jxlToJpeg), bitmapToJxl, resizeJxl(+Limit), jxlDecompressMulti` | — |
+| **zimage** | Thumbnail/resize | **libvips** 59.2.0 (sharp) | ❌ `{error:NOT_SUPPORT}` | `thumbnail, resizeQA` | **P1 (next)** |
 | **mp4thumb** | Thumbnail video | FFmpeg | ⚠️ stub (throw khi gọi) | `generateThumbnail(Async), cancel` | **P2** |
 | **zwalker** | Quét/GC cache media | Rust (NAPI-RS) | ⚠️ stub no-op (guard) | `scanDirectory, deleteHomelessFiles, deleteEmptyFolders, statUnmarkedFiles, updateReferenceMessageId` | **P2** |
 | **file-utilities** | Dung lượng thư mục, hardlink, fs-type | Rust (NAPI-RS) | ⚠️ barrel nuốt lỗi → `{}` | `getDirectorySize(Sync/Async/ByGlob), detectHardlinks*, detectFilesystem*` | **P3** |
@@ -24,28 +26,28 @@ Trạng thái hiện tại của `app/native/nativelibs/*`. **3 module đã port
 
 ---
 
-## Phase 1 — Hiển thị ảnh (P1) · **ưu tiên cao nhất, UX rõ nhất**
+## Phase 1 — Ảnh (P1)
 
-Zalo lưu ảnh dạng **JPEG-XL**. Không có `zjxl` → ảnh trong chat **không hiển thị** (decode fail). `zjxl` + `zimage` cùng dựa trên **libvips/libjxl** → làm chung một build.
+### ✅ `zjxl` — codec JPEG-XL — **DONE (native, byte-identical)**
 
-### Hạ tầng chung: `sharp` (libvips) có hỗ trợ JXL
-- **Rào cản cần xác minh trước:** prebuilt `sharp`/libvips **mặc định KHÔNG bật JXL** (lý do license/size). Ba lựa chọn, xác minh thực tế rồi chọn:
-  1. **Custom libvips + libjxl** rồi `sharp` link vào (`SHARP_FORCE_GLOBAL_LIBVIPS=1` với libvips hệ thống build kèm `--with-jxl`). Sát bản gốc nhất, nhanh nhất lúc chạy. Effort: Med.
-  2. **`@jsquash/jxl`** (WASM, thuần JS) cho decode/encode JXL; `sharp` (bản thường) cho resize/thumbnail. Đơn giản, không cần build C, nhưng chậm hơn & tăng CPU. Effort: Low–Med.
-  3. **Build wrapper N-API quanh libjxl** (giống bản gốc). Sát nhất nhưng nặng nhất. Effort: High.
-- **Khuyến nghị:** thử (2) để có bản chạy nhanh, đo hiệu năng ảnh; nếu chậm chuyển (1).
+**KHÔNG** làm theo hướng `@jsquash`/`sharp` như dự tính ban đầu — đã **RE native đầy đủ từ binary macOS** (`docs/superpowers/plans/2026-07-07-zjxl-linux-native-re.md`, 11 task, merge `4001fd6`):
+- Addon **N-API C++** (`nativelibs/zjxl/`), link **libjxl 0.9.3 + OpenCV 4.12.0 + libjpeg-turbo 3.1.1 + hwy 1.0.7 + brotli 1.0.9** — pin **đúng version macOS bundle**, build từ source vào cache `.deps-prefix/<hash>/`, bundle 9 `.so` cạnh `.node` với `RPATH=$ORIGIN` (self-contained).
+- 6 method: `getJxlInfo, jxlToJpeg(+FromLocalPath), bitmapToJxl, resizeJxl(+Limit), jxlDecompressMulti, moduleReady`.
+- **Byte-identical**: mọi hằng số encode/decode/resize disassemble từ binary mac (`RE-PARAMS.md` + `src/re_params.h`). Decode khớp byte `djxl`; JPEG **baseline+fastDCT+ICC**; resize **bilinear tự viết** (verify bit-exact) cho `resizeJxl`, **OpenCV hai tầng** cho batch; quality `FloatValue×100→cvttss2si truncate`.
+- Verified: 6/6 test trên 22 ảnh JXL thật + chạy qua barrel app (`nativelibs.zjxl()`) đủ 5 method.
 
-### `zjxl` — codec JPEG-XL (P1, load-bearing)
-- **API cần reimplement:** `decodeToJpeg(jxlBuf) → jpegBuf` (hiển thị), `bitmapToJxl(bitmap, quality, opts) → jxlBuf` (gửi ảnh), `jxlToRgb`, `resizeJxl`.
-- **Map sang OSS:** `decodeToJpeg` = JXL→raw→JPEG (`@jsquash/jxl` decode + `sharp().jpeg()`); `bitmapToJxl` = raw→JXL (`sharp().jxl()` hoặc `@jsquash/jxl` encode); `resizeJxl` = decode→`sharp().resize()`→encode.
-- **Rủi ro:** khớp tham số chất lượng/effort của Zalo (ảnh gửi đi phải để đầu kia đọc được). Verify round-trip với ảnh JXL thật lấy từ tài khoản.
+> **Phát hiện quan trọng:** build 26.6.11 bật `--enable-features=JXL` → **Chromium tự giải mã JXL để hiển thị ảnh**; renderer ưu tiên `createImageBitmap`/canvas. `$zFeatures.libjxl.*` (zjxl) chỉ là **fallback** khi Chromium không làm được → trên Linux desktop **hiếm thao tác UI chạm zjxl**. Module vẫn đúng/parity macOS và chạy chính xác khi được gọi.
 
-### `zimage` — thumbnail/resize (P1)
-- **API:** `thumbnail(input, w, h, …) → buf`, `resizeQA(…)`.
-- **Map:** `sharp(input).resize(w,h,{fit}).toBuffer()`; `thumbnail` dùng `sharp().resize()` + `.jpeg()/.webp()`.
-- Effort: Low–Med (chia sẻ build với zjxl).
+### `zimage` — thumbnail/resize (P1, **next**) — dựa trên libvips
 
-**Deliverable Phase 1:** ảnh trong chat hiển thị + gửi ảnh được. Verify: mở 1 chat có ảnh JXL → hiện; gửi 1 ảnh → đầu kia xem được.
+- **API app gọi:** `thumbnail(input, w, h, …) → buf`, `resizeQA(…)`. Bundle mac: **`libvips-cpp.42.dylib` (version 59.2.0)** (từ version-tracker).
+- **Hai hướng (chọn sau khi RE binary):**
+  1. **RE native + libvips từ source** (giống zjxl): build libvips 59.2.0 pinned + reimplement N-API addon từ disasm `zimage` mac. Sát nhất, byte-identical-friendly, nhưng libvips kéo theo nhiều dep (glib, expat, …). Effort: High.
+  2. **`sharp` (libvips)**: map `thumbnail`/`resizeQA` sang `sharp(input).resize(...).toBuffer()`. Nhanh, ít việc C, nhưng không byte-identical và phải khớp shape/format output. Effort: Low–Med.
+- **Bước đầu:** disasm `app/native/nativelibs/zimage/build/darwin_x64/*.node` để lấy API surface chính xác + tham số resize/format; đối chiếu call-site renderer xem `thumbnail`/`resizeQA` được dùng ở đâu (và có bị Chromium/canvas giành như zjxl không).
+- Effort: Med.
+
+**Deliverable Phase 1 (còn lại):** `zimage.thumbnail`/`resizeQA` chạy trên Linux (nếu renderer thực sự gọi — cần xác minh call-site trước, tránh lặp lại tình huống zjxl bị Chromium giành).
 
 ---
 
@@ -90,7 +92,7 @@ Zalo lưu ảnh dạng **JPEG-XL**. Không có `zjxl` → ảnh trong chat **kh�
 
 ## Thứ tự đề xuất
 
-1. **P1 — zjxl + zimage** (ảnh hiển thị/gửi) — thay đổi lớn nhất về trải nghiệm. Bắt đầu bằng spike: xác minh đường JXL (@jsquash vs custom libvips) trên 1 ảnh thật.
+1. ~~**P1 — zjxl**~~ ✅ **DONE** (native, byte-identical). **P1 còn lại — zimage**: bắt đầu bằng disasm binary `zimage` mac để lấy API surface + params, và **xác minh call-site renderer** (tránh lặp lại tình huống zjxl bị Chromium/canvas giành).
 2. **P2 — mp4thumb** (video thumb, dễ với ffmpeg) → **zwalker** (GC, làm khi cache phình).
 3. **P3 — file-utils / file-utilities** (thống kê dung lượng, dễ).
 4. **P4 — zcall**: đánh giá khả thi riêng; mặc định để stub.
