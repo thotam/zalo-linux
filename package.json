@@ -1,9 +1,10 @@
 {
-  "name": "zalo-linux",
+  "name": "com.zalo.linux",
   "version": "1.0.0",
   "description": "Zalo desktop re-ported to Linux x64 from the official macOS DMG (ZaloSetup-universal), packaged as .deb",
   "main": "main.js",
   "license": "MIT",
+  "desktopName": "com.zalo.linux.desktop",
   "scripts": {
     "setup": "SETUP=true node scripts/main.js",
     "build": "BUILD=true node scripts/main.js",
@@ -37,12 +38,12 @@
       "description": "Zalo desktop (Vietnamese messenger) re-ported to Linux from the official macOS build, packaged as .deb.",
       "icon": "app/pc-dist/favicon-512x512.png",
       "mimeTypes": ["x-scheme-handler/zalo"],
+      "syncDesktopName": true,
       "desktop": {
         "entry": {
           "Name": "Zalo",
           "Comment": "Zalo messaging app",
-          "Categories": "Network;InstantMessaging;",
-          "StartupWMClass": "Zalo"
+          "Categories": "Network;InstantMessaging;"
         }
       }
     },
