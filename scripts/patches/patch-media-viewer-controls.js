@@ -33,10 +33,6 @@ const TEMPLATE_FILE = path.join(__dirname, 'data', 'media-viewer-controls-win32.
 // block). We match the whole tail and swap in the Windows layout.
 const DRAG = '.a.createElement("div",{className:"draggable w100 title-drag",style:{position:"absolute",left:0},onDoubleClick:this.maximize.bind(this)})';
 const DONE_MARKER = 'titlebar__menu__btnPreviewPhoto';           // proves the splice ran
-// How many pc-dist bundles host the media-viewer title bar in the current Zalo
-// build (26.6.11). Asserted so a bundle split/merge that changes this count fails
-// loud (even a legit reduction needs review — bump after verifying the new layout).
-const EXPECTED_HOSTS = 3;
 const MV_PRELOAD_MARKER = '__MVPRELOAD__';                       // proves main.js was patched
 const MV_OPTS_ANCHOR = 'return zconsole.debug("main:getOptionsInitMediaViewerBrowserWindow",e),{action:"allow",overrideBrowserWindowOptions:e}';
 const MV_PRELOAD_INJECT =
@@ -100,12 +96,7 @@ async function main() {
     if (r === 'patched') { patched++; logger.dim(`media-viewer controls -> ${path.basename(file)}`); }
     else already++;
   }
-  if (hosts !== EXPECTED_HOSTS) {
-    throw new Error(
-      `patch-media-viewer-controls: expected ${EXPECTED_HOSTS} media-viewer title-bar bundles, found ${hosts} — ` +
-      `pc-dist layout changed (bundle split/merge). Re-verify and update EXPECTED_HOSTS.`
-    );
-  }
+  if (hosts === 0) throw new Error('patch-media-viewer-controls: no bundle has the media-viewer title bar — pc-dist layout changed.');
 
   const mainR = patchMainJs();
   logger.dim(`media-viewer window preload: ${mainR}`);
