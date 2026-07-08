@@ -83,14 +83,19 @@ cmake -S "$SRC/expat/expat" -B "$SRC/expat/b" "${CM[@]}" -DEXPAT_SHARED_LIBS=OFF
   -DEXPAT_BUILD_EXAMPLES=OFF -DEXPAT_BUILD_TOOLS=OFF
 cmake --build "$SRC/expat/b" -j"$JOBS"; cmake --install "$SRC/expat/b"
 
-# ---- glib (meson, static) ----
+# ---- glib (meson, SHARED — must NOT be static) ----
+# glib/gobject/gio MUST be shared, not static. A static glib gets baked into
+# libvips.so.42; when the addon dlopen()s under Electron (which already links the
+# system libgobject/libglib for GTK), libvips's embedded gobject_init_ctor tries
+# to re-register the fundamental type 'gchar' -> "cannot register existing type"
+# -> SIGABRT. Shared glib resolves to a single runtime copy (system glib under
+# Electron, bundled under plain Node) via SONAME, so no double registration.
+# glib is not a codec, so this does NOT affect byte-identical image output.
 # --libdir=lib: on Debian/Ubuntu meson defaults libdir to the multiarch triplet
 # (lib/x86_64-linux-gnu), which our PKG_CONFIG_PATH/CMAKE_PREFIX_PATH don't scan.
-# Force it flat so glib.pc and the static libs land under $PREFIX/lib like every
-# other dep here.
 clone https://gitlab.gnome.org/GNOME/glib.git 2.78.4 glib
-meson setup "$SRC/glib/b" "$SRC/glib" --prefix="$PREFIX" --libdir=lib --buildtype=release --default-library=static \
-  -Dtests=false -Dnls=disabled -Dlibmount=disabled -Dselinux=disabled || meson setup --reconfigure "$SRC/glib/b" "$SRC/glib" --prefix="$PREFIX" --libdir=lib --default-library=static
+meson setup "$SRC/glib/b" "$SRC/glib" --prefix="$PREFIX" --libdir=lib --buildtype=release --default-library=shared \
+  -Dtests=false -Dnls=disabled -Dlibmount=disabled -Dselinux=disabled || meson setup --reconfigure "$SRC/glib/b" "$SRC/glib" --prefix="$PREFIX" --libdir=lib --default-library=shared
 ninja -C "$SRC/glib/b" -j"$JOBS"; ninja -C "$SRC/glib/b" install
 
 # ---- libvips 8.14.2 (meson; shared libvips-cpp, codecs static) ----

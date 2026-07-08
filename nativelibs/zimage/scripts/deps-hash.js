@@ -17,7 +17,7 @@ const PINS = {
   // heavy backends added in Task 6 (jxl/heif/magick/pdf); listed here so enabling
   // them changes the hash:
   backends: 'jpeg+png+spng+webp+gif',   // Task 6 flips to full set
-  flags: 'x64-relwithdebinfo-static-codecs-shared-vipscpp',
+  flags: 'x64-relwithdebinfo-static-codecs-shared-glib-shared-vipscpp',
   abi: 1,
 };
 
