@@ -1,0 +1,7 @@
+{
+  "name": "zimage-native",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Linux native image thumbnail addon (RE of Zalo zimage.node)",
+  "dependencies": { "node-addon-api": "^5.1.0" }
+}
