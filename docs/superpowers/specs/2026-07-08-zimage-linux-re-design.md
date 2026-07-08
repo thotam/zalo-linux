@@ -49,17 +49,18 @@ Bit-identical output requires building the **same libvips release + the same cod
 | **libspng**, **zlib** | pinned | png fast path + deflate |
 | **libwebp** | pinned | webp load/save |
 | **libjxl** | pinned (determine — may differ from zjxl's 0.9.3) | **JXL** load/save inside libvips |
-| **libheif** (+ libde265/x265/aom) | pinned — **scope decision (§3.1)** | heif load/save |
+| **libheif** (+ libde265, x265, aom, dav1d) | pinned | heif/avif load/save |
 | **giflib** | pinned | gif load/save |
-| **ImageMagick** (`magickload`) | pinned — **scope decision (§3.1)** | fallback loader |
+| **ImageMagick** (`magickload`) + its deps | pinned | magick load/save (fallback loader) |
+| **poppler-glib** (or pdfium) + cairo | pinned | pdf load (`pdfload`) |
 
 All built from source into a content-addressed cache `nativelibs/zimage/.deps-prefix/<hash>/`, **statically linked into a single `libvips-cpp.so.42`** (mirror mac). The addon links that one `.so`; the bundle set is minimal (ideally just `libvips-cpp.so.42` + any truly-unavoidable shared dep), `RPATH=$ORIGIN`.
 
-### 3.1 Backend scope decision (heaviest risk)
+### 3.1 Backend scope decision — **FULL parity with mac**
 
-The mac libvips is full-featured (jpeg/png/webp/jxl/heif/gif/magick). **libheif** (pulls libde265/x265/aom) and **ImageMagick** (dozens of deps) are enormous to build and are unlikely on Zalo's thumbnail hot path.
+The mac libvips is full-featured. Confirmed loaders/savers in `libvips-cpp.42.dylib`: **jpeg, png, webp, jxl, gif, heif, magick, pdf, dz** (deepzoom). **Decision (per user): build the FULL backend set exactly matching mac** — including the heavy ones (`libheif`+codecs, `ImageMagick`, `poppler`/PDF). This maximizes parity and covers every input Zalo could feed.
 
-**Decision:** build the **essential set that covers Zalo's image formats — jpeg, png, webp, jxl, gif** (+ spng/zlib) statically, matching mac for those. **heif and magick are excluded by default** and only added if the §5 RE / real-usage check shows Zalo's `thumbnail`/`thumbnailFs` actually feeds HEIF/exotic inputs. Excluding them does not affect byte-identicality on the jpeg/png/webp/jxl/gif paths (libvips dispatches per input magic; the resize+save math for the included formats is identical regardless of which other loaders were compiled in). This is recorded as an explicit, revisitable scope call.
+**Cost/risk acknowledged:** this is a large, fragile dependency tree — `libheif` pulls `libde265`/`x265`/`aom`/`dav1d`; `ImageMagick` pulls delegates (freetype, fontconfig, lcms2, …); PDF pulls `poppler`+`cairo`+`glib`. Building all of these from source, statically, byte-identically is a multi-hour, many-moving-parts effort. The plan **stages the backend builds** (core+glib → common codecs → heavy codecs → magick/pdf) so each stage is independently buildable and the addon can be smoke-tested against the common formats before the heaviest backends land. If a specific heavy backend proves impractical to build byte-identically, that is escalated as a per-backend decision — the default target is full parity.
 
 ## 4. Build strategy — same as zjxl
 
@@ -95,15 +96,15 @@ Samples copied read-only to `scratchpad/` (gitignored); never touch the live pro
 ## 8. `.deb` packaging & CI
 
 - Bundled `.so` (ideally just `libvips-cpp.so.42` + residuals) ship in the app; `RPATH=$ORIGIN`; no system libvips dependency.
-- CI build-time deps: the zjxl set (`cmake nasm ninja-build patchelf git curl`) **plus** what glib/libvips need: `meson`, `pkg-config`, `libglib2.0-dev`-equivalents are built from source (or use `meson`+`ninja` to build glib). Determine the minimal build-tool set during Task 1; add to `.github/workflows/build.yml`.
+- CI build-time deps: the zjxl set (`cmake nasm ninja-build patchelf git curl`) **plus** libvips/glib toolchain: **`meson`** (currently MISSING locally — install via apt/pip), `pkg-config`, `glib-compile-resources`, and whatever the heavy backends need (autotools for ImageMagick, etc.). glib and the codecs are built from source into the deps-prefix. Determine the full build-tool set during Task 1; add to `.github/workflows/build.yml`.
 - Update `nativelibs/expected-versions.json` baseline once zimage's Linux build lands (the tracker already records mac `libvips 59.2.0`).
 
 ## 9. Out of scope (v1)
 
 - ARM64 (x64 only).
 - Byte-identical `.node` binary (output-bytes fidelity only).
-- **heif / ImageMagick backends** unless §5 proves Zalo's thumbnail path needs them.
 - Any method beyond `thumbnail` + `thumbnailFs`.
+- (Full backend parity is IN scope per §3.1 — jpeg/png/webp/jxl/gif/heif/magick/pdf/dz.)
 
 ## 10. Success criteria
 
