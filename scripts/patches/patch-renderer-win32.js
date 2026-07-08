@@ -14,8 +14,8 @@ const PC_DIST = path.join(__dirname, '..', '..', 'app', 'pc-dist');
 // logging, parseKeyFromUrl("DARWIN",...)) are intentionally NOT matched — we only replace
 // the two prefixed literals below, never a bare "DARWIN".
 const REPLACEMENTS = [
-  { name: 'platform prop', from: 'platform:"DARWIN"', to: 'platform:"WIN32"', expected: 2 },
-  { name: 'getClientType', from: 'getClientType(){return 23}', to: 'getClientType(){return 24}', expected: 8 },
+  { name: 'platform prop', from: 'platform:"DARWIN"', to: 'platform:"WIN32"' },
+  { name: 'getClientType', from: 'getClientType(){return 23}', to: 'getClientType(){return 24}' },
 ];
 
 function collectJsFiles(dir) {
@@ -67,16 +67,10 @@ async function main() {
       );
     }
 
-    // This patch replaces ALL occurrences, so correctness does not depend on the
-    // count — a version bump that adds/removes a spoof site is still handled. The
-    // count is only a drift SIGNAL, so warn (don't fail): failing here would block
-    // builds of every benign new Zalo release. Hard breakage (anchor gone from
-    // everywhere) is already the throw above. `expected` tracks the latest verified
-    // build for the warning only.
-    const total = replaced + alreadyPatched;
-    if (total !== rep.expected) {
-      logger.warn(`${rep.name}: expected ${rep.expected} occurrences, found ${total} — Zalo bundle changed, re-verify (non-fatal).`);
-    }
+    // No occurrence-count assertion: this patch replaces ALL matches, so the count
+    // is not a correctness invariant — a version bump that adds/removes a spoof site
+    // is still handled. The only meaningful failure (anchor gone from every bundle)
+    // is the throw above.
     if (replaced === 0) logger.dim(`${rep.name}: already patched (${alreadyPatched}x ${rep.to} present)`);
     else logger.success(`${rep.name}: replaced ${replaced}x -> ${rep.to}`);
   }

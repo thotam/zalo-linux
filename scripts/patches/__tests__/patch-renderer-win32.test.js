@@ -17,8 +17,8 @@ fs.copyFileSync(path.join(__dirname, '..', 'patch-renderer-win32.js'), path.join
 // The copied patch file does require('fs-extra'); give it a node_modules to resolve against.
 fs.symlinkSync(path.join(__dirname, '..', '..', '..', 'node_modules'), path.join(repo, 'node_modules'), 'dir');
 
-// Match the real 26.6.20 occurrence counts referenced by the patch: 2 platform
-// props + 8 getClientType. The cosmetic "DARWIN" uses must stay untouched.
+// A few occurrences of each prefixed literal (the patch replaces ALL of them);
+// the cosmetic "DARWIN" uses must stay untouched.
 const sample = 'a({platform:"DARWIN",v:1});b({platform:"DARWIN",v:2});' +
   'getClientType(){return 23}'.repeat(8) +
   '"DARWIN".toLowerCase();OS:{DARWIN:"DARWIN"}';
