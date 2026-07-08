@@ -45,6 +45,7 @@ async function main() {
       logger.step('Applying patches');
       await require('./patches/patch-platform-id.js').main();
       await require('./patches/patch-renderer-win32.js').main();
+      await require('./patches/patch-titlebar-controls.js').main();
       await require('./patches/patch-sqlite3.js').main();
       await require('./patches/patch-db-cross-v4.js').main();
       await require('./patches/patch-zfile.js').main();
