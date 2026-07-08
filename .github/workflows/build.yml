@@ -29,7 +29,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             p7zip-full build-essential libssl-dev liblzma-dev libsqlcipher-dev \
-            dpkg fakeroot cmake nasm ninja-build patchelf git curl
+            dpkg fakeroot cmake nasm ninja-build patchelf git curl \
+            python3 python3-pil
 
       - name: Install npm deps
         run: npm install --no-audit --no-fund
