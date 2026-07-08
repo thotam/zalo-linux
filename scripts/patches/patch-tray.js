@@ -34,13 +34,17 @@ const EDITS = [
     replacement: 'Nt=p.createFromPath(c.join(te(),"apple-icon-57x57.png")).resize({width:44,height:44})',
   },
   {
+    // The app's real show/restore-window function (`Ae`), reached on Linux via the
+    // tray "Mở Zalo" -> en() -> here (verified by logging: J()=24 != K=23, so en's
+    // mac `J()===K` branch is skipped). After show(), a maximized frameless window
+    // stays blank under XWayland — force one native reconfigure (unmaximize->maximize,
+    // deferred; isMaximized() checked inside since it can read false right after show).
     name: 'show-from-tray reveal',
-    marker: 'e.isMaximized()&&setTimeout(function(){try{!e.isDestroyed()&&e.isMaximized()&&(e.unmaximize(),e.maximize())',
-    anchor: 'function en(e){if(e){if(J()===K)return e.isMinimized()?e.restore():e.show(),void e.focus();',
-    replacement: 'function en(e){if(e){if(J()===K)return e.isMinimized()?e.restore():e.show(),' +
-      '"linux"===process.platform&&e.isMaximized()&&setTimeout(function(){' +
-      'try{!e.isDestroyed()&&e.isMaximized()&&(e.unmaximize(),e.maximize())}catch(_){}},60),' +
-      'void e.focus();',
+    marker: '"linux"===process.platform&&setTimeout(function(){try{!Ae.isDestroyed()&&Ae.isMaximized()&&(Ae.unmaximize(),Ae.maximize(),Ae.focus())',
+    anchor: 'if(Ae){Ae.isMinimized()?Ae.restore():Ae.show(),Ae.focus();',
+    replacement: 'if(Ae){Ae.isMinimized()?Ae.restore():Ae.show(),Ae.focus();' +
+      '"linux"===process.platform&&setTimeout(function(){' +
+      'try{!Ae.isDestroyed()&&Ae.isMaximized()&&(Ae.unmaximize(),Ae.maximize(),Ae.focus())}catch(_){}},60);',
   },
 ];
 
