@@ -40,20 +40,49 @@ constexpr bool kThumbLinear     = false;        // "linear" NOT set -> default F
 constexpr int  kThumbIntent     = kIntentRelative; // =1. "intent" NOT set -> default VIPS_INTENT_RELATIVE. certain(unset->default).
 
 // ===== Output-format dispatch (ThumbnailAsyncWorker::Execute) =====
-// if (format == "jpeg")  -> flatten alpha onto WHITE [255,255,255], then jpegsave (see below)
+// if (format == "jpeg")  -> IF vips_image_hasalpha(img): flatten onto WHITE
+//                           [255,255,255] first; THEN jpegsave (see below).
 // else (i.e. "png")      -> pngsave (no options)
 // Only "jpeg" and "png" are ever produced. WebP is NEVER emitted by this addon.
 // The JS `quality` argument is NOT forwarded to native (ctor takes only
 // buffer,int width,int height,std::string format,callback), so Q is never set.
+//
+// CORRECTION (re-verified directly against
+// app/native/nativelibs/zimage/darwin_x64/zimage.node with r2 during Task 4,
+// 2026-07-09): the original Task 2 pass at RE-PARAMS.md read the flatten call
+// as unconditional and the background as a single scalar. Both are wrong.
+// Full disassembly of ThumbnailAsyncWorker::Execute @0x1468 shows:
+//   0x1501  call operator==(format, "jpeg")
+//   0x150c  test al,al; je 0x15a5          -> else branch: pngsave, no flatten
+//   0x1512  call vips_image_hasalpha(img)  -> ONLY reached when format=="jpeg"
+//   0x1519  test eax,eax; je 0x15be        -> no alpha: skip flatten, jpegsave as-is
+//   0x151f..0x1543  build background = vips_array_double_new({255.0,255.0,255.0}, 3)
+//   0x155d  call vips_flatten(img, &out, "background", bg3, NULL)
+//   0x15dd  call vips_jpegsave_buffer(img_or_flat, &buf, &len, "strip", 1, NULL)
+// i.e. flatten is GATED on vips_image_hasalpha(), and the background is a
+// 3-element array [255,255,255] (verified via `pf ddd` at the movaps source
+// address section.5.__TEXT.__const: both preloaded doubles are 0x406fe0...
+// = 255.0, matching the explicit third movabs 255.0). Reproducing this
+// unconditionally (as the original doc said) corrupts every alpha-less JPEG:
+// vips_flatten always drops the LAST band regardless of whether it is really
+// alpha, verified with `vips flatten` CLI on a real 3-band sRGB sample
+// (3 bands in -> 2 bands out, i.e. it silently discards the blue channel).
 
 // ----- JPEG save: vips_jpegsave_buffer(img, &buf, &len, "strip", 1, NULL) @0x15fb -----
 constexpr int  kJpegQ           = 75;    // "Q" NOT set -> mozjpeg/libvips default 75. certain(unset->default).
 constexpr bool kJpegOptimize    = false; // "optimize_coding" NOT set -> default FALSE. certain(unset->default).
 constexpr int  kJpegSubsample   = kSubsampleAuto; // =0. "subsample_mode" NOT set -> default AUTO. certain(unset->default).
 constexpr bool kJpegStrip       = true;  // "strip" EXPLICITLY set to 1 @0x15eb..0x15f2. certain(explicit).
-// JPEG alpha handling: pre-flatten over white RGB(255,255,255) via vips_flatten
-// "background"=[255,255,255] @0x152d..0x155d (double 255.0 = 0x406fe000...). certain(explicit).
-constexpr double kJpegFlattenBg = 255.0;
+// JPEG alpha handling: IF vips_image_hasalpha(img) (@0x1512, checked ONLY on
+// the jpeg path), pre-flatten over white RGB(255,255,255) via vips_flatten
+// "background"=[255,255,255] (3-element VipsArrayDouble, "push 3; pop rsi"
+// @0x153b before vips_array_double_new) @0x151f..0x155d. certain(explicit).
+// Each background component: double 255.0 = 0x406fe000... (verified via r2
+// `pf ddd` on section.5.__TEXT.__const, the movaps source for the first two
+// components, plus the explicit third movabs). Flatten is SKIPPED entirely
+// (image passed to jpegsave unchanged) when hasalpha() is false.
+constexpr double kJpegFlattenBg = 255.0;  // single-channel value; array = {kJpegFlattenBg}x3
+constexpr bool kJpegFlattenOnlyIfAlpha = true; // gate @0x1512-0x1519. certain(explicit).
 
 // ----- PNG save: vips_pngsave_buffer(img, &buf, &len, NULL) @0x15b7 (NO options) -----
 constexpr int  kPngCompression  = 6;     // "compression" NOT set -> default 6. certain(unset->default).

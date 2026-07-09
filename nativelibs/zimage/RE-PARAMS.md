@@ -124,12 +124,44 @@ then `vips_image_write_to_file(out, dest)` (format/options driven by dest extens
 Operator confirmed `operator==` via `rabin2 -s`: symbol `__ZNSt3__1eqB8ne180100...`
 (`eq` = `operator==`; `B8ne180100` is just the libc++ `[abi:...]` tag).
 
-- **`format == "jpeg"`** (fall-through): flatten alpha → white, then jpegsave.
+- **`format == "jpeg"`** (fall-through): **if** `vips_image_hasalpha(img)`, flatten alpha → white, **then** jpegsave. If no alpha, jpegsave the thumbnailed image unchanged.
 - **else (`"png"`)** (`je 0x15a5`): pngsave, no options. Only jpeg & png are produced.
+
+> **CORRECTION (re-verified 2026-07-09 during Task 4, directly against the mac
+> binary with `r2`):** the flatten call is **NOT unconditional** as originally
+> stated here, and the background array has **3 elements**, not 1. Full trace
+> of `ThumbnailAsyncWorker::Execute` @0x1468:
+> ```
+> 0x1501  call operator==(format, "jpeg")
+> 0x150c  test al,al; je 0x15a5                 -> else: pngsave (no flatten)
+> 0x1512  call vips_image_hasalpha(img)          -> only reached when jpeg
+> 0x1519  test eax,eax; je 0x15be                -> no alpha: skip flatten
+> 0x151f  movaps xmm0, [section.__const]         ; two doubles, both 255.0
+> 0x152d  movabs rax, 0x406fe00000000000         ; third double, 255.0
+> 0x153b  push 3 ; pop rsi                        ; n = 3
+> 0x153e  call vips_array_double_new              ; {255.0,255.0,255.0}
+> 0x155d  call vips_flatten(img,&out,"background",bg3,NULL)
+> 0x15dd  call vips_jpegsave_buffer(img_or_flat,&buf,&len,"strip",1,NULL)
+> ```
+> `pf ddd` at the `movaps` source address (`section.5.__TEXT.__const`)
+> confirms both preloaded doubles are `0x406fe00000000000` = 255.0, matching
+> the explicit third `movabs 255.0` — i.e. background = `[255,255,255]`.
+> Reproducing the original (unconditional, 1-element) reading is a real bug:
+> `vips_flatten` unconditionally treats the **last band** as alpha and drops
+> it, with no check that the image actually has an alpha channel. Confirmed
+> empirically with the pinned Linux libvips: `vips flatten` on a real 3-band
+> sRGB JPEG sample (no alpha) turns it into a **2-band** image, silently
+> discarding the blue channel. Since the overwhelming majority of JPEG inputs
+> have no alpha channel, applying flatten unconditionally would corrupt nearly
+> every JPEG thumbnail the mac addon ever produced — implausible for shipped
+> software, and disproven by the `vips_image_hasalpha` call visible in the
+> disassembly once traced fully (the original Task 2 pass stopped short of
+> it).
 
 ### JPEG path
 ```
-0x151f..0x155d  vips_flatten(img, "background", [255,255,255])   ; movabs 0x406fe0..=255.0
+0x1512  vips_image_hasalpha(img)                                      ; gate
+0x151f..0x155d  vips_flatten(img, "background", [255,255,255], NULL)  ; ONLY if hasalpha
 0x15dd  lea rsi,[rbx+0x88] ; &buf
 0x15e4  lea rdx,[rbx+0xb8] ; &len
 0x15eb  lea rcx, str.strip                 ; "strip"
@@ -137,12 +169,13 @@ Operator confirmed `operator==` via `rabin2 -s`: symbol `__ZNSt3__1eqB8ne180100.
 0x15f6  xor r9d,r9d                         ; NULL terminator
 0x15fb  call vips_jpegsave_buffer
 ```
-Reconstructed: `vips_jpegsave_buffer(img, &buf, &len, "strip", 1, NULL)`.
+Reconstructed: `if (vips_image_hasalpha(img)) img = vips_flatten(img, "background", [255,255,255]); vips_jpegsave_buffer(img, &buf, &len, "strip", 1, NULL)`.
 
 | Constant | Value | Address / evidence | Confidence |
 |---|---|---|---|
 | `kJpegStrip` | `true` (1) | `"strip"` + `push 1` @0x15eb–0x15f2 | **certain (explicit)** |
-| `kJpegFlattenBg` | `255.0` | movabs `0x406fe00000000000` @0x152d → `vips_flatten background` @0x154a | **certain (explicit)** |
+| `kJpegFlattenOnlyIfAlpha` | `true` | `vips_image_hasalpha` call + `je 0x15be` @0x1512–0x1519 gating the flatten | **certain (explicit)** |
+| `kJpegFlattenBg` | `[255.0, 255.0, 255.0]` (3-elem) | movaps (2×255.0) @0x151f + movabs 255.0 @0x152d, `push 3` (n) @0x153b → `vips_array_double_new` @0x153e → `vips_flatten background` @0x155d | **certain (explicit)** |
 | `kJpegQ` | `75` | `"Q"` never passed → mozjpeg/libvips default 75 | certain (unset→default) |
 | `kJpegOptimize` | `false` | `"optimize_coding"` never passed → default FALSE | certain (unset→default) |
 | `kJpegSubsample` | `0` (AUTO) | `"subsample_mode"` never passed → default AUTO | certain (unset→default) |
@@ -204,7 +237,9 @@ LD_LIBRARY_PATH="$PREFIX/lib" "$PREFIX/bin/vipsthumbnail" \
 
 ## Summary of confidence
 
-- **Explicit (certain):** `kThumbSize=FORCE`, `kJpegStrip=true`, `kJpegFlattenBg=255`,
+- **Explicit (certain):** `kThumbSize=FORCE`, `kJpegStrip=true`,
+  `kJpegFlattenBg=[255,255,255]` (3-elem, gated by `kJpegFlattenOnlyIfAlpha` /
+  `vips_image_hasalpha` — corrected in Task 4, see the JPEG-path section above),
   format dispatch (jpeg vs png), FS variant uses write-to-file.
 - **Certain (unset→libvips-8.14.2 default):** `kThumbCrop`, `kThumbAutoRotate`,
   `kThumbLinear`, `kThumbIntent`, `kJpegQ`, `kJpegOptimize`, `kJpegSubsample`,
