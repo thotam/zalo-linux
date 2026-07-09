@@ -140,7 +140,35 @@ cmake --build "$BUILD/libtiff" -j"$JOBS"; cmake --install "$BUILD/libtiff"
 # still pulls in -ljpeg/-lz when linking libvips.
 sed -i 's/^Requires\.private:/Requires:/' "$PREFIX/lib/pkgconfig/libtiff-4.pc"
 
-# ---- cgif 0.3.2 (static; meson — GIF save, mac uses cgif not giflib for save) ----
+# ---- libimagequant 2.17.0 (static; plain Makefile/configure — C, not the 4.x Rust
+# rewrite) ----
+# libvips 8.14's cgif_dep is gated behind a quantisation package: cgif is only
+# looked up (meson.build: `if quantisation_package.found() ... cgif_dep = ...`) if
+# imagequant_dep (pkg-config "imagequant") or quantizr_dep is found FIRST. Without
+# this, `-Dcgif=enabled` + libcgif.a present is not enough — cgif_dep silently stays
+# disabler() and "GIF save with cgif" reports false even though cgif itself built
+# fine. The mac dylib confirms libimagequant specifically (strings: "selected
+# quantisation package: imagequant", liq_* symbols, "Trellis quantisation" /
+# "Quantisation effort" — imagequant-specific terminology), not quantizr.
+# libimagequant 2.x (unlike 4.x) is plain C99, no Rust/cargo needed. Its top-level
+# CMakeLists.txt unconditionally builds a SHARED lib too (ignores BUILD_SHARED_LIBS)
+# which would leave a stray libimagequant.so for the linker to prefer over the
+# static .a — breaking the static-codecs-only design used throughout this script.
+# So build via its Makefile/configure directly and install ONLY the static lib.
+clone https://github.com/ImageOptim/libimagequant 2.17.0 imagequant
+if [ ! -f "$SRC/imagequant/config.mk" ]; then
+  ( cd "$SRC/imagequant" && ./configure --prefix="$PREFIX" --libdir="$PREFIX/lib" \
+      --includedir="$PREFIX/include" --pkgconfigdir="$PREFIX/lib/pkgconfig" \
+      --extra-cflags="-fPIC" )
+fi
+make -C "$SRC/imagequant" static imagequant.pc
+install -Dm644 "$SRC/imagequant/libimagequant.a" "$PREFIX/lib/libimagequant.a"
+install -Dm644 "$SRC/imagequant/libimagequant.h" "$PREFIX/include/libimagequant.h"
+install -Dm644 "$SRC/imagequant/imagequant.pc" "$PREFIX/lib/pkgconfig/imagequant.pc"
+
+# ---- cgif 0.3.2 (static; meson — GIF save, mac uses cgif not giflib for save;
+# requires libimagequant above to be present so libvips's cgif_dep actually
+# activates — see the libimagequant block) ----
 clone https://github.com/dloebl/cgif V0.3.2 cgif
 meson setup "$BUILD/cgif" "$SRC/cgif" --prefix="$PREFIX" --libdir=lib --buildtype=release \
   --default-library=static -Dtests=false
@@ -221,15 +249,19 @@ ninja -C "$BUILD/glib" -j"$JOBS"; ninja -C "$BUILD/glib" install
 # cplusplus is a boolean option in 8.14's meson_options.txt (not a feature) -> true.
 # There is no top-level "gif" option in 8.14: GIF *read* is the bundled nsgif
 # decoder (boolean, default true, no external lib needed); GIF *write* is the
-# separate "cgif" feature (needs libcgif, built above — matches the mac config
-# line "GIF save with cgif: true"). giflib is still built above for forward-compat
-# but libvips 8.14 doesn't link it for gifload/gifsave either way.
+# separate "cgif" feature (needs libcgif AND a quantisation package (libimagequant,
+# built above) — see the libimagequant block for why cgif alone isn't enough;
+# together they match the mac config line "GIF save with cgif: true"). giflib is
+# still built above for forward-compat but libvips 8.14 doesn't link it for
+# gifload/gifsave either way.
 #
 # Task 6 backend set — matches the mac libvips-cpp.42.dylib build-config exactly:
 # jpeg (mozjpeg), spng (PNG — NOT libpng, mac has "PNG load/save with libpng:
-# false"), webp, tiff, heif (HEIC/AVIF), lcms (ICC), exif (EXIF), cgif (GIF save),
-# orc (loop accel) all enabled; jpeg-xl, magick, pdfium, poppler, openjpeg all
-# disabled like mac (enabling them would DIVERGE from mac's feature set).
+# false"), webp, tiff, heif (HEIC/AVIF), lcms (ICC), exif (EXIF), imagequant
+# (quantisation package that gates cgif — see the libimagequant block above),
+# cgif (GIF save), orc (loop accel) all enabled; jpeg-xl, magick, pdfium, poppler,
+# openjpeg all disabled like mac (enabling them would DIVERGE from mac's feature
+# set).
 #
 # GLIB_VERSION_MAX_ALLOWED pin: glib 2.78's g_free() fast-path macro (gmem.h,
 # guarded by GLIB_VERSION_MAX_ALLOWED >= GLIB_VERSION_2_78) is missing outer
@@ -249,7 +281,7 @@ meson setup "$BUILD/libvips" "$SRC/libvips" --prefix="$PREFIX" --libdir=lib --bu
   --default-library=shared -Ddeprecated=false -Dexamples=false -Dcplusplus=true -Dnsgif=true \
   -Dintrospection=false -Dvapi=false -Dmodules=disabled \
   -Djpeg=enabled -Dspng=enabled -Dwebp=enabled -Dtiff=enabled -Dheif=enabled \
-  -Dlcms=enabled -Dexif=enabled -Dcgif=enabled -Dorc=enabled \
+  -Dlcms=enabled -Dexif=enabled -Dimagequant=enabled -Dcgif=enabled -Dorc=enabled \
   -Djpeg-xl=disabled -Dmagick=disabled -Dpdfium=disabled -Dpoppler=disabled \
   -Dopenjpeg=disabled -Dpng=disabled \
   -Dc_args="$GLIB_COMPAT_ARGS" -Dcpp_args="$GLIB_COMPAT_ARGS"
