@@ -251,20 +251,46 @@ only, marked **assumed/unused**; do not rely on them for parity.
 
 ---
 
-## Step 3 cross-check — DEFERRED
+## Step 3 cross-check — DONE (independent libvips oracle; both paths byte-exact)
 
-`node nativelibs/zimage/scripts/deps-hash.js` →
-`nativelibs/zimage/.deps-prefix/0a877d1c9c92`, but
-`.deps-prefix/0a877d1c9c92/bin/vipsthumbnail` does **not exist yet** (Task 1 deps build
-still in progress). Cross-check deferred per brief. Real samples are staged in
-`scratchpad/img-samples/` (6 JPEG + JXL). The disassembly is unambiguous
-(`size=FORCE`, `height` set, jpeg `strip=1`, everything else default), so recovery does
-not depend on the CLI check. Re-run once the pinned `vipsthumbnail` exists:
+Ran the addon against `scratchpad/img-samples/` (6 real JPEGs) at 200x200 and
+byte-compared each output to an **independent** `vips` CLI invocation built from the
+same pinned prefix (`093533589e32`), using exactly the RE'd params:
+
+- **FS path** (`resizeQA`/`thumbnailFs` = `vips_thumbnail` + `write_to_file`, no strip):
+  compared to `vips thumbnail IN OUT 200 --height 200 --size force`.
+  → **6/6 IDENTICAL** (`cmp -s`).
+- **Buffer path** (`thumbnail` = `vips_thumbnail_buffer` + `jpegsave strip=1`):
+  compared to `vips thumbnail IN tmp.v 200 --height 200 --size force` then
+  `vips jpegsave tmp.v OUT --strip`.
+  → **6/6 IDENTICAL** (`cmp -s`).
+
+This confirms, byte-exact, that (a) the recovered params are correct — `size=FORCE`,
+`height` set, all other thumbnail options at default, jpeg `strip=1` on the buffer path
+and no strip on the fs path — and (b) the addon adds no hidden divergence over a plain
+libvips call. Reproduce:
 ```
 PREFIX=$(node nativelibs/zimage/scripts/deps-hash.js)
-LD_LIBRARY_PATH="$PREFIX/lib" "$PREFIX/bin/vipsthumbnail" \
-  scratchpad/img-samples/<file>.jpg --size <W> -o /tmp/vt.jpg
+export LD_LIBRARY_PATH="$PREFIX/lib"
+# fs path:
+"$PREFIX/bin/vips" thumbnail IN.jpg /tmp/cli.jpg 200 --height 200 --size force
+# buffer path (add strip):
+"$PREFIX/bin/vips" thumbnail IN.jpg /tmp/t.v 200 --height 200 --size force
+"$PREFIX/bin/vips" jpegsave /tmp/t.v /tmp/cli-buf.jpg --strip
 ```
+
+### Residual gap vs the mac binary (honest caveat)
+
+This oracle uses **our** libvips 8.14.2 + mozjpeg 4.1.1 build, not the mac's. A true
+mac-vs-Linux byte diff is **not possible on Linux**: the mac `zimage.node` /
+`libvips-cpp.42.dylib` are x86_64 Mach-O and cannot execute here. The remaining
+unverified equality is *our libvips build ≡ mac's libvips build in JPEG encoding* — both
+pin the identical upstream versions (libvips 8.14.2, mozjpeg 4.1.1, "certain" from the
+mac dylib strings) and mozjpeg encoding is deterministic given the same version + the
+same libvips pipeline, so the risk is low, but it is not zero (compiler / build-flag
+differences could in principle alter output). To close it fully, run the mac `zimage.node`
+on a mac (or otherwise obtain mac-generated reference thumbnails for the same inputs) and
+byte-diff against the Linux addon output.
 
 ---
 
@@ -282,6 +308,7 @@ LD_LIBRARY_PATH="$PREFIX/lib" "$PREFIX/bin/vipsthumbnail" \
   same libvips version.
 - **Assumed/unused:** all WebP constants (addon never emits WebP).
 
-To later functionally confirm the "unset→default" values, run the deferred `vipsthumbnail`
-cross-check against `scratchpad/img-samples/` once Task 1's pinned deps exist, and compare
-byte output of a native Linux build against the mac addon on the same inputs.
+The "unset→default" values are now functionally confirmed byte-exact against an
+independent `vips` CLI oracle on all 6 sample JPEGs, for both the fs and buffer paths
+(see "Step 3 cross-check — DONE" above). The only remaining gap is the mac-build vs
+Linux-build encoding equality, which cannot be checked without running the mac binary.
