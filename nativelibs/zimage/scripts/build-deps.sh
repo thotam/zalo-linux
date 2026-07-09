@@ -23,7 +23,7 @@ if [ -f "$PREFIX/.done" ]; then echo "deps-prefix cache hit: $PREFIX"; exit 0; f
 BUILD="$PREFIX/.build"
 mkdir -p "$BUILD"
 
-for tool in meson ninja cmake pkg-config git curl nasm; do
+for tool in meson ninja cmake pkg-config git curl nasm autoreconf automake autoconf; do
   command -v "$tool" >/dev/null || { echo "missing build tool: $tool" >&2; exit 1; }
 done
 
@@ -63,10 +63,19 @@ cmake --build "$BUILD/libspng" -j"$JOBS"; cmake --install "$BUILD/libspng"
 # libspng.pc"). Alias it so pkg-config resolves either name to our static build.
 cp "$PREFIX/lib/pkgconfig/libspng_static.pc" "$PREFIX/lib/pkgconfig/libspng.pc"
 
-# ---- libjpeg-turbo (static) ----
-clone https://github.com/libjpeg-turbo/libjpeg-turbo 3.0.2 ljt
-cmake -S "$SRC/ljt" -B "$BUILD/ljt" "${CM[@]}" -DENABLE_SHARED=OFF -DENABLE_STATIC=ON -DWITH_TURBOJPEG=ON
-cmake --build "$BUILD/ljt" -j"$JOBS"; cmake --install "$BUILD/ljt"
+# ---- mozjpeg 4.1.1 (static; libjpeg-turbo fork, JPEG codec on mac) ----
+# mac's libvips-cpp.42.dylib embeds "mozjpeg version 4.1.1 (build 20230321)" — NOT
+# libjpeg-turbo. mozjpeg is API/ABI-compatible with libjpeg (installs libjpeg.a +
+# jpeglib.h) so libvips's jpeg loader/saver links it exactly like libjpeg-turbo
+# before, but produces byte-identical-to-mac JPEG output. PNG_SUPPORTED=OFF (we
+# use libspng for PNG, not mozjpeg's bundled cjpeg/djpeg PNG support) and
+# WITH_TURBOJPEG=OFF (libvips doesn't need the turbojpeg wrapper API, only libjpeg).
+# mozjpeg's CMakeLists always configures pkgscripts/libjpeg.pc regardless of
+# WITH_TURBOJPEG, so meson's dependency('libjpeg') still resolves via pkg-config.
+clone https://github.com/mozilla/mozjpeg v4.1.1 mozjpeg
+cmake -S "$SRC/mozjpeg" -B "$BUILD/mozjpeg" "${CM[@]}" -DENABLE_SHARED=OFF -DENABLE_STATIC=ON \
+  -DPNG_SUPPORTED=OFF -DWITH_TURBOJPEG=OFF
+cmake --build "$BUILD/mozjpeg" -j"$JOBS"; cmake --install "$BUILD/mozjpeg"
 
 # ---- libwebp (static) ----
 clone https://github.com/webmproject/libwebp v1.3.2 webp
@@ -88,6 +97,101 @@ dl https://downloads.sourceforge.net/project/giflib/giflib-5.x/giflib-5.2.1.tar.
 make -C "$SRC/giflib-5.2.1" libgif.a
 install -Dm644 "$SRC/giflib-5.2.1/libgif.a" "$PREFIX/lib/libgif.a"
 install -Dm644 "$SRC/giflib-5.2.1/gif_lib.h" "$PREFIX/include/gif_lib.h"
+
+# ---- Task 6 backends: match the mac libvips build config exactly ----
+# The mac libvips-cpp.42.dylib build-config string has these ON: libtiff, lcms2
+# (ICC), libexif (EXIF), cgif (GIF save), orc (loop accel), libheif (HEIC/AVIF,
+# itself backed by libde265/x265/aom/dav1d) — and libjxl/ImageMagick/PDF/OpenJPEG
+# OFF. Adding exactly this set (no more) below, all static, in dependency order.
+
+# ---- lcms2 2.15 (static; meson — avoids the autotools/libtool path) ----
+clone https://github.com/mm2/Little-CMS lcms2.15 lcms2
+meson setup "$BUILD/lcms2" "$SRC/lcms2" --prefix="$PREFIX" --libdir=lib --buildtype=release \
+  --default-library=static -Dsamples=false -Dfastfloat=false -Dthreaded=false \
+  -Djpeg=disabled -Dtiff=disabled
+ninja -C "$BUILD/lcms2" -j"$JOBS"; ninja -C "$BUILD/lcms2" install
+
+# ---- libexif 0.6.24 (static; autotools — no cmake/meson upstream at this tag).
+# libtool IS present on this system (libtoolize + /usr/share/libtool/build-aux/
+# ltmain.sh from the `libtool` apt package); there's just no standalone `libtool`
+# binary in PATH, which is normal — autoreconf generates the project-local
+# ./libtool script from ltmain.sh during bootstrap. ----
+clone https://github.com/libexif/libexif v0.6.24 libexif
+if [ ! -f "$SRC/libexif/configure" ]; then
+  ( cd "$SRC/libexif" && autoreconf -fi )
+fi
+mkdir -p "$BUILD/libexif"
+# --with-pic: libtool's static-only builds default to non-PIC objects (assumes
+# linking into a static executable); this .a gets linked into shared
+# libvips-cpp.so.42, so PIC is required (cmake builds get this for free via
+# CMAKE_POSITION_INDEPENDENT_CODE=ON in $CM; autotools needs it spelled out).
+( cd "$BUILD/libexif" && "$SRC/libexif/configure" --prefix="$PREFIX" --enable-shared=no --enable-static=yes \
+    --with-pic --disable-nls )
+make -C "$BUILD/libexif" -j"$JOBS"; make -C "$BUILD/libexif" install
+
+# ---- libtiff 4.5.0 (static; cmake, jpeg=ON against our mozjpeg) ----
+clone https://gitlab.com/libtiff/libtiff v4.5.0 libtiff
+cmake -S "$SRC/libtiff" -B "$BUILD/libtiff" "${CM[@]}" -Dtiff-tools=OFF -Dtiff-tests=OFF \
+  -Dtiff-contrib=OFF -Dtiff-docs=OFF -Djpeg=ON -Dlzma=OFF -Dzstd=OFF -Dwebp=OFF -Djbig=OFF -Dlibdeflate=OFF
+cmake --build "$BUILD/libtiff" -j"$JOBS"; cmake --install "$BUILD/libtiff"
+# libtiff-4.pc lists its zlib/libjpeg deps under Requires.private (jpeg=ON above
+# adds "libjpeg" there) — same Requires.private-vs-plain-query bug as libwebp and
+# libheif below; promote to a public Requires so meson's non-static dependency()
+# still pulls in -ljpeg/-lz when linking libvips.
+sed -i 's/^Requires\.private:/Requires:/' "$PREFIX/lib/pkgconfig/libtiff-4.pc"
+
+# ---- cgif 0.3.2 (static; meson — GIF save, mac uses cgif not giflib for save) ----
+clone https://github.com/dloebl/cgif V0.3.2 cgif
+meson setup "$BUILD/cgif" "$SRC/cgif" --prefix="$PREFIX" --libdir=lib --buildtype=release \
+  --default-library=static -Dtests=false
+ninja -C "$BUILD/cgif" -j"$JOBS"; ninja -C "$BUILD/cgif" install
+
+# ---- orc 0.4.33 (static; meson — libvips loop-acceleration backend) ----
+clone https://gitlab.freedesktop.org/gstreamer/orc 0.4.33 orc
+meson setup "$BUILD/orc" "$SRC/orc" --prefix="$PREFIX" --libdir=lib --buildtype=release \
+  --default-library=static -Dtests=disabled -Dexamples=disabled -Dbenchmarks=disabled \
+  -Dorc-test=disabled -Dgtk_doc=disabled
+ninja -C "$BUILD/orc" -j"$JOBS"; ninja -C "$BUILD/orc" install
+
+# ---- HEIF stack (all static): dav1d -> libde265 -> aom -> x265 -> libheif ----
+
+# dav1d 1.2.0 (meson; AV1 decoder used by libheif for AVIF)
+clone https://code.videolan.org/videolan/dav1d 1.2.0 dav1d
+meson setup "$BUILD/dav1d" "$SRC/dav1d" --prefix="$PREFIX" --libdir=lib --buildtype=release \
+  --default-library=static -Denable_tools=false -Denable_examples=false -Denable_tests=false \
+  -Denable_docs=false
+ninja -C "$BUILD/dav1d" -j"$JOBS"; ninja -C "$BUILD/dav1d" install
+
+# libde265 1.0.12 (cmake; HEVC/HEIC decoder used by libheif)
+clone https://github.com/strukturag/libde265 v1.0.12 libde265
+cmake -S "$SRC/libde265" -B "$BUILD/libde265" "${CM[@]}" -DENABLE_SDL=OFF -DENABLE_DECODER=ON \
+  -DENABLE_ENCODER=OFF
+cmake --build "$BUILD/libde265" -j"$JOBS"; cmake --install "$BUILD/libde265"
+
+# libheif is built DECODE-ONLY: HEVC decode via libde265 + AV1 decode via dav1d.
+# The HEVC/AV1 ENCODERS (x265, aom) are deliberately NOT built:
+#   - zimage's thumbnail path only DECODES HEIC/AVIF *input* and then saves JPEG/PNG;
+#     it never SAVES HEIF, so the encoders are never on the output path — decode-only
+#     libheif produces byte-identical THUMBNAIL output to a full libheif.
+#   - x265 3.5 sets cmake_policy(SET CMP0025/CMP0054 OLD), which CMake 4.2 hard-rejects
+#     (OLD no longer supported); aom 3.6.0's test_nasm rejects the system nasm 3.01.
+#     Both are encoder-only for our purposes, so dropping them removes two build
+#     blockers with zero effect on thumbnail bytes.
+# (deps-hash.js still pins aom/x265 as cache keys; they are intentionally unbuilt —
+# see the note there.)
+
+# libheif 1.15.2 (cmake; decode-only: libde265 (HEVC) + dav1d (AV1)). Static, codecs
+# built in (not plugins) — matches the mac "libheif: true (dynamic module: false)".
+clone https://github.com/strukturag/libheif v1.15.2 libheif
+cmake -S "$SRC/libheif" -B "$BUILD/libheif" "${CM[@]}" -DBUILD_SHARED_LIBS=OFF -DWITH_EXAMPLES=OFF \
+  -DWITH_LIBDE265=ON -DWITH_DAV1D=ON \
+  -DWITH_X265=OFF -DWITH_AOM_DECODER=OFF -DWITH_AOM_ENCODER=OFF \
+  -DWITH_SvtEnc=OFF -DWITH_RAV1E=OFF -DENABLE_PLUGIN_LOADING=OFF
+cmake --build "$BUILD/libheif" -j"$JOBS"; cmake --install "$BUILD/libheif"
+# libheif.pc lists de265/dav1d under Requires.private; pkg-config only expands those
+# for a `--static` query, but meson's dependency() does a plain query by default, so
+# without this the -lde265/-ldav1d flags silently drop off libvips's link line.
+sed -i 's/^Requires\.private:/Requires:/' "$PREFIX/lib/pkgconfig/libheif.pc"
 
 # ---- expat (static) ----
 clone https://github.com/libexpat/libexpat R_2_6_0 expat
@@ -116,10 +220,16 @@ ninja -C "$BUILD/glib" -j"$JOBS"; ninja -C "$BUILD/glib" install
 # ---- libvips 8.14.2 (meson; shared libvips-cpp, codecs static) ----
 # cplusplus is a boolean option in 8.14's meson_options.txt (not a feature) -> true.
 # There is no top-level "gif" option in 8.14: GIF *read* is the bundled nsgif
-# decoder (boolean, default true, no external lib needed); GIF *write* would be
-# the separate "cgif" feature (needs libcgif, not giflib) — left at its "auto"
-# default so it silently no-ops without libcgif. giflib is still built above for
-# forward-compat but libvips 8.14 doesn't link it for gifload.
+# decoder (boolean, default true, no external lib needed); GIF *write* is the
+# separate "cgif" feature (needs libcgif, built above — matches the mac config
+# line "GIF save with cgif: true"). giflib is still built above for forward-compat
+# but libvips 8.14 doesn't link it for gifload/gifsave either way.
+#
+# Task 6 backend set — matches the mac libvips-cpp.42.dylib build-config exactly:
+# jpeg (mozjpeg), spng (PNG — NOT libpng, mac has "PNG load/save with libpng:
+# false"), webp, tiff, heif (HEIC/AVIF), lcms (ICC), exif (EXIF), cgif (GIF save),
+# orc (loop accel) all enabled; jpeg-xl, magick, pdfium, poppler, openjpeg all
+# disabled like mac (enabling them would DIVERGE from mac's feature set).
 #
 # GLIB_VERSION_MAX_ALLOWED pin: glib 2.78's g_free() fast-path macro (gmem.h,
 # guarded by GLIB_VERSION_MAX_ALLOWED >= GLIB_VERSION_2_78) is missing outer
@@ -138,8 +248,10 @@ clone https://github.com/libvips/libvips v8.14.2 libvips
 meson setup "$BUILD/libvips" "$SRC/libvips" --prefix="$PREFIX" --libdir=lib --buildtype=release \
   --default-library=shared -Ddeprecated=false -Dexamples=false -Dcplusplus=true -Dnsgif=true \
   -Dintrospection=false -Dvapi=false -Dmodules=disabled \
-  -Djpeg=enabled -Dpng=enabled -Dspng=enabled -Dwebp=enabled \
-  -Djpeg-xl=disabled -Dheif=disabled -Dmagick=disabled -Dpdfium=disabled -Dpoppler=disabled \
+  -Djpeg=enabled -Dspng=enabled -Dwebp=enabled -Dtiff=enabled -Dheif=enabled \
+  -Dlcms=enabled -Dexif=enabled -Dcgif=enabled -Dorc=enabled \
+  -Djpeg-xl=disabled -Dmagick=disabled -Dpdfium=disabled -Dpoppler=disabled \
+  -Dopenjpeg=disabled -Dpng=disabled \
   -Dc_args="$GLIB_COMPAT_ARGS" -Dcpp_args="$GLIB_COMPAT_ARGS"
 ninja -C "$BUILD/libvips" -j"$JOBS"; ninja -C "$BUILD/libvips" install
 
