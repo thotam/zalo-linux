@@ -717,53 +717,60 @@ git commit -m "zimage: thumbnailFs (file->file, format from output extension)"
 
 ---
 
-## Task 6: Full backend parity — add jxl / heif / magick / pdf to libvips
+## Task 6: Full backend parity — match the mac libvips build config EXACTLY
+
+**IMPORTANT — corrected scope (from the mac `libvips-cpp.42.dylib` build-config string, authoritative):** the mac libvips has these ENABLED: `libjpeg` (**mozjpeg 4.1.1**), `libspng` (PNG), `libwebp`, GIF (nsgif load + **cgif** save), **libheif** (HEIC/AVIF), **libtiff**, **lcms2** (ICC), **libexif** (EXIF), **ORC** (loop accel). These are DISABLED: **libjxl (false)**, **ImageMagick (Magick load/save: false)**, **PDF/PDFium (false)**, **OpenJPEG/JPEG2000 (false)**, FFTW (false). So matching mac EXACTLY means: swap jpeg to mozjpeg, and add heif/tiff/lcms/exif/cgif/orc — and do NOT add jxl, ImageMagick, or PDF/poppler (enabling them would DIVERGE from mac — e.g. mac's zimage cannot decode JXL, so ours must not either, for true parity). This is much smaller/safer than "everything".
 
 **Files:**
-- Modify: `nativelibs/zimage/scripts/deps-hash.js` (PINS.backends → full), `nativelibs/zimage/scripts/build-deps.sh` (add heavy codecs + enable in libvips)
+- Modify: `nativelibs/zimage/scripts/deps-hash.js` (PINS: jpeg→mozjpeg, add backend libs), `nativelibs/zimage/scripts/build-deps.sh` (swap mozjpeg, add heif/tiff/lcms/exif/cgif/orc + their deps, enable in libvips)
 
 **Interfaces:**
-- Consumes: Task 1 build-deps.
-- Produces: a rebuilt `.deps-prefix/<new-hash>/lib/libvips-cpp.so.42` whose `vips -l` lists **jxl, heif, magick, pdf** loaders/savers in addition to the Task-1 set.
+- Consumes: Task 1 build-deps (per-prefix build dirs, shared glib — keep those).
+- Produces: a rebuilt `.deps-prefix/<new-hash>/lib/libvips-cpp.so.42` whose `vips --vips-config` matches the mac config (mozjpeg jpeg, spng png, webp, cgif gif save, heif, tiff, lcms, exif, orc ON; jxl/magick/pdf/openjpeg OFF), and whose `libvips.so.42` still dynamic-links glib.
 
-- [ ] **Step 1: Flip the backend pin (changes the hash → fresh prefix)**
+- [ ] **Step 1: Update PINS (changes the hash → fresh prefix; per-prefix build dirs handle it)**
 
-Edit `deps-hash.js`: set `PINS.backends = 'full-jpeg+png+spng+webp+gif+jxl+heif+magick+pdf'` and add the new lib versions to `PINS` (`libjxl`, `libhwy`, `brotli`, `libheif`, `libde265`, `x265`, `aom`, `dav1d`, `imagemagick`, `poppler`, `cairo`, `pixman`, `freetype`, `fontconfig`, `lcms2`, `libtiff`), pinned to the versions the mac libvips embeds (from Task 2 / the mac dylib strings).
+Edit `deps-hash.js`: replace `libjpeg_turbo: '3.0.2'` with `mozjpeg: '4.1.1'` (mozjpeg is the jpeg codec — certain from RE). Add pinned versions for the new backend libs and their deps: `libheif`, `libde265`, `x265`, `aom`, `dav1d`, `libtiff`, `lcms2`, `libexif`, `cgif`, `orc`. Pin each to a sensible recent release (recover the exact version from the mac dylib strings where present — e.g. grep `libtiff`/`libheif`/`lcms`/`libexif` version strings; where indeterminate, pin a stable release and record it `assumed`). Set `backends: 'mozjpeg+spng+webp+cgif+gif+heif+tiff+lcms+exif+orc'`. Do NOT add libjxl/imagemagick/poppler/openjpeg.
 
-- [ ] **Step 2: Extend `build-deps.sh` with the heavy codecs (before the libvips step)**
+- [ ] **Step 2: `build-deps.sh` — swap mozjpeg + add the enabled backends**
 
-Insert build blocks (static where possible) for: **libjxl** (+ highway, brotli) — reuse the exact cmake invocation from `nativelibs/zjxl/scripts/build-deps.sh`; **libde265**, **x265**, **aom**, **dav1d**, then **libheif** (cmake, enabling those); **lcms2**, **freetype**, **fontconfig**, **libtiff**, then **ImageMagick** (autotools `./configure --disable-shared --enable-static --with-modules=no` + delegates); **pixman**, **cairo**, then **poppler** (cmake, `-DENABLE_GLIB=ON -DBUILD_SHARED_LIBS=OFF`). Then change the libvips meson flags to:
-```
--Djpeg-xl=enabled -Dheif=enabled -Dmagick=enabled -Dpoppler=enabled -Dtiff=enabled -Dlcms=enabled
-```
-Build in dependency order; each `cmake --install`/`make install` into `$PREFIX`.
+- **Swap jpeg → mozjpeg 4.1.1**: replace the libjpeg-turbo block with mozjpeg (a libjpeg-turbo fork; same cmake, `clone https://github.com/mozilla/mozjpeg v4.1.1`, `-DENABLE_SHARED=OFF -DENABLE_STATIC=ON -DPNG_SUPPORTED=OFF -DWITH_TURBOJPEG=OFF`). mozjpeg provides `libjpeg.a` that libvips's jpeg loader/saver links → byte-identical JPEG.
+- **Add (static, into `$BUILD/<dep>`)**, in dependency order: `lcms2` (cmake), `libexif` (cmake or autotools), `libtiff` (cmake, `-Djpeg=ON` against our mozjpeg, `-Dlzma=OFF -Dzstd=OFF -Dwebp=OFF` to keep deps minimal), `cgif` (meson/cmake, GIF save), `orc` (meson, loop accel), and the HEIF stack: `dav1d` (meson), `libde265` (cmake), `aom` (cmake), `x265` (cmake), then `libheif` (cmake, `-DWITH_LIBDE265=ON -DWITH_X265=ON -DWITH_AOM_DECODER=ON -DWITH_AOM_ENCODER=ON -DWITH_DAV1D=ON -DBUILD_SHARED_LIBS=OFF`).
+- **libvips meson flags** — change to match the mac config:
+  ```
+  -Djpeg=enabled -Dspng=enabled -Dwebp=enabled -Dtiff=enabled -Dheif=enabled \
+  -Dlcms=enabled -Dexif=enabled -Dcgif=enabled -Dorc=enabled -Dnsgif=true \
+  -Djpeg-xl=disabled -Dmagick=disabled -Dpdfium=disabled -Dpoppler=disabled \
+  -Dopenjpeg=disabled -Dpng=disabled
+  ```
+  (`-Dpng=disabled` because mac uses spng, not libpng, for PNG — `PNG load/save with libpng: false`.) Keep glib `--default-library=shared` and the per-prefix build dirs. Note `orc`/`cgif` need `meson`/`nasm` (present).
+- libtool is needed by some autotools deps (libexif) — if a dep's autotools needs it and it's missing, prefer that dep's cmake path, or report BLOCKED (user installs `libtool-bin`).
 
-- [ ] **Step 3: Rebuild + verify full backend set**
+- [ ] **Step 3: Rebuild + verify the config matches mac**
 
-Run:
 ```bash
-bash nativelibs/zimage/scripts/build-deps.sh   # long — full stack from source
-PREFIX=$(node nativelibs/zimage/scripts/deps-hash.js)
-LD_LIBRARY_PATH="$PREFIX/lib" "$PREFIX/bin/vips" -l | grep -iE 'jxlload|heifload|magickload|pdfload|webpload|gifload|jpegload|pngload'
+P=$(node nativelibs/zimage/scripts/deps-hash.js); rm -rf "$P"
+bash nativelibs/zimage/scripts/build-deps.sh    # long — full stack from source
+LD_LIBRARY_PATH="$P/lib" "$P/bin/vips" --vips-config
 ```
-Expected: all of `jxlload`, `heifload`, `magickload`, `pdfload` (+ the Task-1 loaders) are present. Rebuild the addon (`node nativelibs/builder.js nativelibs/zimage`) and re-run the Task 4/5 tests — they must still pass (the addon code is unchanged; only libvips gained loaders). If a heavy backend genuinely cannot build byte-identically, escalate that backend per spec §3.1 rather than silently dropping it.
+Expected config lines match the mac: `JPEG load/save with libjpeg: true` (mozjpeg — verify `strings "$P/lib/libvips.so.42" | grep 'mozjpeg version 4.1.1'`), `PNG load/save with libspng: true`, `libpng: false`, `TIFF ... libtiff: true`, `HEIC/AVIF ... libheif: true`, `WebP ... true`, `GIF save with cgif: true`, `lcms: true`, `libexif: true`, `ORC: true`, and `JXL ... libjxl: false`, `Magick load/save: false`, `PDF ... false`. Then confirm libvips STILL dynamic-links glib: `readelf -d "$P/lib/libvips.so.42" | grep -iE 'NEEDED.*(glib|gobject)'` (must be present).
 
-- [ ] **Step 4: Verify a JXL input thumbnails (the format Zalo uses most)**
+- [ ] **Step 4: Rebuild addon + re-run Tasks 4/5 tests + byte-identical JPEG check**
 
-Run:
 ```bash
-LD_LIBRARY_PATH="$PREFIX/lib" ELECTRON_RUN_AS_NODE=1 node_modules/.bin/electron -e '
-  const a=require("./nativelibs/zimage/build/Release/zimage.node"), fs=require("fs"), p=require("path");
-  const d="scratchpad/jxl-samples"; const f=p.join(d, fs.readdirSync(d).find(x=>x.endsWith(".jxl")));
-  a.thumbnail(fs.readFileSync(f),128,128,"jpg",80,(e,b)=>{ if(e){console.error(e);process.exit(1)} console.log("jxl->thumb",b.length); process.exit(0); });'
+node nativelibs/builder.js nativelibs/zimage
+T=$(mktemp -d); for so in "$P"/lib/libvips.so.42* "$P"/lib/libvips-cpp.so.42* "$P"/lib/libz.so*; do ln -sf "$so" "$T/"; done
+LD_LIBRARY_PATH="$T" ELECTRON_RUN_AS_NODE=1 node_modules/.bin/electron nativelibs/zimage/__tests__/thumbnail.test.js
+LD_LIBRARY_PATH="$T" ELECTRON_RUN_AS_NODE=1 node_modules/.bin/electron nativelibs/zimage/__tests__/thumbnailFs.test.js
+rm -rf "$T"
 ```
-Expected: prints `jxl->thumb <N>` (proves libvips decodes a real Zalo JXL and thumbnails it).
+Tasks 4/5 must still pass (addon code unchanged; only the JPEG codec + backend set changed). With mozjpeg now in place, the JPEG thumbnail output is the byte-identical-eligible codec — if a mac-produced reference thumbnail is available, compare bytes; otherwise document that JPEG now uses mozjpeg 4.1.1 (matching mac) so output is version-pinned-identical. Also verify a HEIF and a TIFF input thumbnail if such a sample exists (the newly-enabled loaders).
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add nativelibs/zimage/scripts/deps-hash.js nativelibs/zimage/scripts/build-deps.sh
-git commit -m "zimage: full libvips backend parity (jxl/heif/magick/pdf) built from pinned source"
+git commit -m "zimage: match mac libvips backend config (mozjpeg 4.1.1 + heif/tiff/lcms/exif/cgif/orc; jxl/magick/pdf disabled like mac)"
 ```
 
 ---
