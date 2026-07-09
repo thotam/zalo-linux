@@ -14,9 +14,10 @@ const logger = require('../utils/logger');
 //   2. icon    : load the app's apple-icon-57x57.png and nativeImage.resize() it
 //                to 44x44 at runtime (follows the app icon on version bumps; .ico
 //                renders poorly on Linux trays).
-//   3. reveal  : the show helper `en()` calls e.show() on Linux -> a maximized
-//                frameless window stays blank under XWayland; force one native
-//                reconfigure (unmaximize->maximize), same fix as patch-relaunch-reveal.
+//
+// Reveal-from-tray needs NO fix on Electron 39: it runs native Wayland, so the
+// maximized-frameless blank that XWayland/E22 hit is gone. Zalo's own
+// `Ae.show()` reveal is used as-is (the old unmaximize->maximize toggle is dropped).
 // ---------------------------------------------------------------------------
 
 const MAIN_JS = path.join(__dirname, '..', '..', 'app', 'main-dist', 'main.js');
@@ -37,19 +38,6 @@ const EDITS = [
     marker: 'apple-icon-57x57.png',
     anchor: 'Nt=p.createFromPath(c.join(te(),"favicon.ico"))',
     replacement: 'Nt=p.createFromPath(c.join(te(),"apple-icon-57x57.png")).resize({width:44,height:44})',
-  },
-  {
-    // The app's real show/restore-window function (`Ae`), reached on Linux via the
-    // tray "Mở Zalo" -> en() -> here (verified by logging: J()=24 != K=23, so en's
-    // mac `J()===K` branch is skipped). After show(), a maximized frameless window
-    // stays blank under XWayland — force one native reconfigure (unmaximize->maximize,
-    // deferred; isMaximized() checked inside since it can read false right after show).
-    name: 'show-from-tray reveal',
-    marker: '"linux"===process.platform&&setTimeout(function(){try{!Ae.isDestroyed()&&Ae.isMaximized()&&(Ae.unmaximize(),Ae.maximize(),Ae.focus())',
-    anchor: 'if(Ae){Ae.isMinimized()?Ae.restore():Ae.show(),Ae.focus();',
-    replacement: 'if(Ae){Ae.isMinimized()?Ae.restore():Ae.show(),Ae.focus();' +
-      '"linux"===process.platform&&setTimeout(function(){' +
-      'try{!Ae.isDestroyed()&&Ae.isMaximized()&&(Ae.unmaximize(),Ae.maximize(),Ae.focus())}catch(_){}},60);',
   },
   {
     // Unread indicator on the tray ICON (Linux). The badge method sets the tray
