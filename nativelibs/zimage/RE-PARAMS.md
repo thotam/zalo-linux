@@ -80,20 +80,53 @@ Reconstructed call:
 
 ### File variant — `ThumbnailFsAsyncWorker::Execute` @0x38f8
 
+**Full disassembly (Task 5, re-verified with `r2 -A` directly against the mac
+binary — the earlier pass below stopped at @0x3906..0x397a and left the
+@0x393d..0x3979 span undocumented; that span is now confirmed to be pure
+error-handling, not any hidden flatten/alpha logic):**
+
 ```
-0x3906  mov  rdi, [rdi+0x68]           ; filename
+0x38f8  push rbp ; mov rbp, rsp ; push r14 ; push rbx ; sub rsp, 0x30
+0x3903  mov  rbx, rdi                  ; this
+0x3906  mov  rdi, [rdi+0x68]           ; inputPath (std::string data ptr)
 0x390a  mov  edx, [rbx+0x90]           ; width
 0x3910  mov  r8d, [rbx+0x94]           ; height VALUE
-0x3917  and  qword [var_8h], 0         ; NULL terminator
+0x3917  and  qword [var_8h], 0         ; NULL terminator on stack
 0x391d  mov  dword [rsp], 3            ; "size" VALUE = 3
 0x3924  lea  rcx, str.height
 0x392b  lea  r9,  str.size
 0x3932  lea  rsi, [var_18h]            ; &out
 0x3938  call vips_thumbnail
-0x397a  call vips_image_write_to_file  ; dest = [rbx+0x70]
+0x393d  test eax, eax
+0x393f  je   0x396e                    ; rc==0 (success) -> skip error path
+   ; --- error path (rc!=0): throws "An error occurred in thumbnailing
+   ; --- using file system" as a std::string, taken only on vips_thumbnail
+   ; --- failure. No vips_image_hasalpha / vips_flatten call anywhere here.
+0x3941..0x396c  (build+throw error string; jmp 0x39b0 to epilogue)
+0x396e  mov  rdi, [var_18h]            ; out
+0x3972  mov  rsi, [rbx+0x70]           ; outputPath (std::string data ptr)
+0x3976  xor  edx, edx                  ; NULL options terminator
+0x3978  xor  eax, eax                  ; 0 vector regs (no va_arg floats)
+0x397a  call vips_image_write_to_file  ; vips_image_write_to_file(out, outputPath, NULL)
+0x397f  mov  rdi, [var_18h]
+0x3983  push 1 ; pop rsi
+0x3986  call vips_image_set_kill       ; vips_image_set_kill(out, 1) -- post-write cleanup
+0x398b  mov  rdi, [var_18h]
+0x398f  call g_object_unref            ; g_object_unref(out)
+0x3994..0x39ab  free the two heap-allocated path strings (operator delete[])
+0x39b0  add rsp,0x30 ; pop rbx ; pop r14 ; pop rbp ; ret
 ```
-Reconstructed: `vips_thumbnail(filename, &out, width, "height", height, "size", 3, NULL)`
-then `vips_image_write_to_file(out, dest)` (format/options driven by dest extension, all defaults).
+Reconstructed: `vips_thumbnail(inputPath, &out, width, "height", height, "size", 3, NULL)`
+then, only on success, `vips_image_write_to_file(out, outputPath, NULL)` — **zero
+save options**, format driven entirely by `outputPath`'s extension via libvips'
+own `vips_foreign_find_save` dispatch. Confirmed there is **no**
+`vips_image_hasalpha`/`vips_flatten` call in this function at all (unlike the
+buffer variant, which gates a flatten-onto-white on `vips_image_hasalpha` for
+the jpeg path) — the entire 192-byte function body is accounted for above, and
+the `str.jpg`/`str.png`/`strip`/`vips_array_double_new` symbols referenced by
+the buffer variant do not appear in this function's disassembly or its nearby
+string xrefs. So `thumbnailFs` never flattens alpha and never sets a "strip"
+option; it is a strictly thinner pipeline than `thumbnail`.
 
 | Constant | Value | Enum | Address / evidence | Confidence |
 |---|---|---|---|---|
@@ -240,7 +273,8 @@ LD_LIBRARY_PATH="$PREFIX/lib" "$PREFIX/bin/vipsthumbnail" \
 - **Explicit (certain):** `kThumbSize=FORCE`, `kJpegStrip=true`,
   `kJpegFlattenBg=[255,255,255]` (3-elem, gated by `kJpegFlattenOnlyIfAlpha` /
   `vips_image_hasalpha` — corrected in Task 4, see the JPEG-path section above),
-  format dispatch (jpeg vs png), FS variant uses write-to-file.
+  format dispatch (jpeg vs png), FS variant uses write-to-file with ZERO save
+  options and NO flatten/hasalpha call at all (full disassembly, Task 5).
 - **Certain (unset→libvips-8.14.2 default):** `kThumbCrop`, `kThumbAutoRotate`,
   `kThumbLinear`, `kThumbIntent`, `kJpegQ`, `kJpegOptimize`, `kJpegSubsample`,
   `kPngCompression`, `kPngStrip`, `kPngPalette`. These are provably not set; parity is

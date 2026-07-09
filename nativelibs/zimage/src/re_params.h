@@ -97,9 +97,14 @@ constexpr int  kWebpEffort      = 4;     // libvips webpsave default. assumed/un
 constexpr bool kWebpLossless    = false; // libvips webpsave default. assumed/unused.
 
 // ----- ThumbnailFs (write-to-file) save options -----
-// vips_image_write_to_file(out, dest) @0x397a: format & options are chosen by
-// libvips from the destination file extension with ALL defaults (no VOptions
-// passed). No per-format overrides. certain(unset->default).
+// vips_image_write_to_file(out, dest, NULL) @0x397a: format & options are
+// chosen by libvips from the destination file extension with ALL defaults
+// (no VOptions passed). No per-format overrides. certain(unset->default).
+// Task 5 full disassembly of ThumbnailFsAsyncWorker::Execute (@0x38f8..0x39b8,
+// all 192 bytes accounted for) additionally confirms there is NO
+// vips_image_hasalpha/vips_flatten call anywhere in this function -- unlike
+// the buffer variant (ThumbnailAsyncWorker), thumbnailFs never flattens
+// alpha before writing. certain(explicit, full function disassembled).
 
 // ===== Codec versions the mac libvips was built against (from dylib strings) =====
 // libvips        8.14.2      (certain: "print libvips version" string)
