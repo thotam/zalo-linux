@@ -20,6 +20,10 @@ pnpm-lock.yaml
 nativelibs/zjxl/.deps-prefix/
 nativelibs/zjxl/deps-src/
 
+# zimage libvips deps (built from pinned source into a content-addressed cache)
+nativelibs/zimage/.deps-prefix/
+nativelibs/zimage/deps-src/
+
 # Scratch / installer / logs
 temp/
 *.dmg
@@ -31,3 +35,6 @@ temp/
 
 # Local scratch — real Zalo JXL samples used for tests (personal images, never commit)
 scratchpad/
+
+# Superpowers SDD scratch (briefs, reports, review diffs — never commit)
+.superpowers/

@@ -18,6 +18,10 @@
 //  - Do NOT trust libturbojpeg's Mach-O version (it's the TurboJPEG *API* version
 //    0.4.0, not the libjpeg-turbo release 3.1.1) — read the embedded
 //    "libjpeg-turbo version X.Y.Z" string instead.
+//  - zimage static-links every codec into one dylib (libvips-cpp.42.dylib), so the
+//    codec versions are NOT separate bundled dylibs — they survive only as embedded
+//    strings. zimagePinsCheck() greps mozjpeg/orc/aom/libpng out of that dylib and
+//    diffs against zimage's build PINS (mozjpeg drift = non-byte-identical JPEGs).
 //  - OS-provided libs (libSystem, libc++, libobjc, system frameworks) are excluded
 //    so macOS-SDK bumps don't cause false drift.
 //
@@ -219,6 +223,49 @@ function printSnapshot(snap) {
   }
 }
 
+// ---- zimage PINS cross-check (static-linked codecs vs the mac dylib) -------
+//
+// zimage bundles ONE dylib (libvips-cpp.42.dylib) with every codec STATICALLY
+// linked into it — so, unlike zjxl, the codec versions are not separate bundled
+// dylibs the Mach-O parser can read; they survive only as embedded version
+// strings. Grep those out of the mac dylib and diff against zimage's build PINS.
+// Only codecs whose exact version is recoverable as a string are checked (mozjpeg,
+// orc, aom, libpng); the rest print "…: true" with no version. mozjpeg is the
+// byte-critical one (JPEG thumbnail encoding); a drift there means our thumbnails
+// would no longer be byte-identical to the mac's.
+function zimagePinsCheck() {
+  let pins;
+  try { pins = require('../zimage/scripts/deps-hash.js').PINS; } catch { return []; }
+  const zdir = path.join(MODULES_DIR, 'zimage');
+  if (!fs.existsSync(zdir)) return [];
+  // Locate the x64 mac libvips-cpp dylib.
+  let dylib = null;
+  (function find(d) {
+    for (const e of fs.readdirSync(d)) {
+      const p = path.join(d, e);
+      const st = fs.statSync(p);
+      if (st.isDirectory()) { if (/darwin_arm64|win32/.test(p)) continue; find(p); }
+      else if (/^libvips-cpp\..*\.dylib$/.test(e) && !dylib) dylib = p;
+    }
+  })(zdir);
+  if (!dylib) return [];
+  let strs;
+  try { strs = execSync(`strings -a ${JSON.stringify(dylib)}`, { encoding: 'utf8', maxBuffer: 128 * 1024 * 1024 }); }
+  catch { return []; }
+  const grab = re => { const m = strs.match(re); return m ? m[1] : null; };
+  const map = [
+    ['mozjpeg', grab(/mozjpeg version ([0-9]+\.[0-9]+\.[0-9]+)/)],
+    ['orc',     grab(/orc-([0-9]+\.[0-9]+\.[0-9]+)/)],
+    ['aom',     grab(/AOMedia Project AV1[^\n]*v([0-9]+\.[0-9]+\.[0-9]+)/)],
+    ['libpng',  grab(/libpng version ([0-9]+\.[0-9]+\.[0-9]+)/)],
+  ];
+  const out = [];
+  for (const [pin, mac] of map) {
+    if (mac && pins[pin] && mac !== pins[pin]) out.push({ pin, mac, pinned: pins[pin] });
+  }
+  return out;
+}
+
 // ---- zjxl PINS cross-check (are we still building what the mac ships?) -----
 
 function zjxlPinsCheck(snap) {
@@ -258,8 +305,9 @@ if (UPDATE) {
 const base = fs.existsSync(MANIFEST) ? JSON.parse(fs.readFileSync(MANIFEST, 'utf8')) : {};
 const changes = diff(base, cur);
 const pinDrift = zjxlPinsCheck(cur);
+const zimageDrift = zimagePinsCheck();
 
-if (!changes.length && !pinDrift.length) {
+if (!changes.length && !pinDrift.length && !zimageDrift.length) {
   if (!QUIET) { console.log('Native library versions match the baseline manifest.'); printSnapshot(cur); }
   process.exit(0);
 }
@@ -283,6 +331,15 @@ if (pinDrift.length) {
   }
   console.error('\n  -> update PINS in nativelibs/zjxl/scripts/deps-hash.js to the mac values,');
   console.error('     re-run build-deps.sh, and re-verify re_params.h (encoder/decoder libs).');
+}
+if (zimageDrift.length) {
+  console.error('\nzimage: our build PINS no longer match the mac libvips codecs (mozjpeg drift');
+  console.error('breaks byte-identical JPEG thumbnails):\n');
+  for (const d of zimageDrift) {
+    console.error(`  ${d.pin.padEnd(16)} pinned ${String(d.pinned).padEnd(10)} mac ${d.mac}`);
+  }
+  console.error('\n  -> update PINS in nativelibs/zimage/scripts/deps-hash.js to the mac values,');
+  console.error('     re-run scripts/build-deps.sh (new deps-prefix hash), and re-verify RE-PARAMS.md.');
 }
 console.error('\nIf these changes are expected (you updated to a new Zalo build), refresh the');
 console.error('baseline with:  node nativelibs/scripts/check-native-versions.js --update');

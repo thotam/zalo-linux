@@ -35,6 +35,9 @@ async function main() {
       //      zjxl          : build native JPEG-XL addon (pinned libjxl 0.9.3 +
       //                      libjpeg-turbo 3.1.1 + OpenCV 4.12) + bundle .so +
       //                      splice linux branch (images render/send)
+      //      zimage        : build native libvips thumbnail addon (libvips 8.14.2
+      //                      + mozjpeg 4.1.1, mac backend parity) + bundle .so
+      //                      closure w/ RPATH=$ORIGIN + splice linux branch
       // Notify (non-fatally) if this Zalo build changed any bundled/linked native
       // library version vs our tracked baseline — so pins (e.g. zjxl libjxl /
       // libjpeg-turbo) can be updated to stay byte-identical. Never blocks SETUP.
@@ -61,6 +64,7 @@ async function main() {
       await require('./patches/patch-linux-guards.js').main();
       await require('./patches/patch-v8-profiles.js').main();
       await require('./patches/patch-zjxl.js').main();
+      await require('./patches/patch-zimage.js').main();
       logger.success('All patches applied');
     }
 
