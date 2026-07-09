@@ -1,7 +1,9 @@
-// Functional test for zimage.thumbnail(). Byte-identical JPEG output vs the
-// mac binary is NOT expected yet: the mac used mozjpeg 4.1.1, this build
-// currently links libjpeg-turbo (Task 6 swaps in mozjpeg). Instead this
-// verifies: valid output signatures, and exact FORCE dimensions (size=FORCE
+// Functional test for zimage.thumbnail(). This build now links mozjpeg 4.1.1
+// (matching the mac, since Task 6), so JPEG output should be byte-comparable to
+// the mac binary — but that cross-check against real mac output is still
+// deferred (see RE-PARAMS.md "Step 3"). Until then this test does not assert
+// byte-identity; it verifies valid output signatures and exact FORCE dimensions
+// (size=FORCE
 // stretches to precisely width x height, no aspect preservation) for both
 // calling conventions the addon must support and both formats the mac
 // binary ever produces ("jpeg" -> JPEG, anything else -> PNG per RE-PARAMS.md).
