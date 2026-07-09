@@ -20,7 +20,7 @@ CpuProfiler::CpuProfiler() {}
 CpuProfiler::~CpuProfiler() {}
 
 void CpuProfiler::Initialize(Local<Object> target) {
-  HandleScope scope(target->GetIsolate());
+  HandleScope scope(v8::Isolate::GetCurrent());
 
   Local<Object> cpuProfiler = Nan::New<Object>();
   Local<Array> profiles = Nan::New<Array>();

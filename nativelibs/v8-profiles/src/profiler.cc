@@ -13,7 +13,7 @@ namespace nodex {
                .ToLocalChecked())
 
 void InitializeProfiler(v8::Local<v8::Object> target) {
-  v8::Isolate* isolate = target->GetIsolate();
+  v8::Isolate* isolate = v8::Isolate::GetCurrent();
   HandleScope scope(isolate);
 
   // create enviroment data

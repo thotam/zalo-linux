@@ -66,7 +66,7 @@ Local<Object> TranslateAllocationProfile(v8::Isolate* isolate,
 #endif
 
 void SamplingHeapProfiler::Initialize(Local<Object> target) {
-  HandleScope scope(target->GetIsolate());
+  HandleScope scope(v8::Isolate::GetCurrent());
   // local object
   Local<Object> samplingHeapProfile = Nan::New<Object>();
   // methods

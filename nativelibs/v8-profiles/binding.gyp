@@ -25,7 +25,7 @@
         ["OS == \"linux\"", {
           "cflags_cc": [
             "-O2",
-            "-std=c++17",
+            "-std=c++20",
             "-Wno-sign-compare",
             "-Wno-cast-function-type",
             "-Wno-unused-result"
