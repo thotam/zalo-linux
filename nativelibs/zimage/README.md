@@ -21,15 +21,33 @@ Built against the content-addressed prefix in `.deps-prefix/<hash>` (see
 `scripts/deps-hash.js` / `scripts/build-deps.sh`, Task 1):
 
 - libvips 8.14.2 (shared `libvips-cpp.so.42`, codecs statically linked in)
-- glib 2.78.4 (static)
+- glib 2.78.4 (**shared** — `libvips.so.42` dynamic-links `libglib-2.0.so.0`/
+  `libgobject-2.0.so.0`/`libgio-2.0.so.0`; see "glib must be shared" below)
 - expat 2.6.0, zlib 1.3.1, libpng 1.6.39, libspng 0.7.4, libjpeg-turbo 3.0.2,
   libwebp 1.3.2, giflib 5.2.1 (all static)
 
 Backend set currently enabled: `jpeg+png+spng+webp+gif`. The full backend set
 (jxl/heif/imagemagick/pdf) is added in Task 6, which will bump the deps-prefix hash.
 
-Flags: `x64-relwithdebinfo-static-codecs-shared-vipscpp` (see `PINS` in
+Flags: `x64-relwithdebinfo-static-codecs-shared-glib-shared-vipscpp` (see `PINS` in
 `scripts/deps-hash.js`).
+
+### glib must be shared (not static) — Electron compatibility
+
+glib/gobject/gio are built **shared**, not static. A static glib gets baked into
+`libvips.so.42`; when the addon `dlopen()`s under Electron (which already links the
+system glib/gobject for GTK), libvips's embedded `gobject_init_ctor` tries to
+re-register the fundamental type `gchar` → `cannot register existing type 'gchar'`
+→ SIGABRT. Building glib shared means a single glib copy is used at runtime (the
+system glib under Electron, resolved by SONAME; the bundled one under plain Node),
+so there is no double registration. glib is not a codec, so this has **no effect on
+byte-identical image output**. The image codecs (jpeg/png/webp/gif) remain statically
+linked into `libvips.so.42`. Verified: `readelf -d libvips.so.42` shows
+`libglib-2.0.so.0` NEEDED, and `moduleReady()` loads cleanly under Electron.
+
+Build dirs are per-prefix (`.deps-prefix/<hash>/.build/`) so a hash change always
+configures against the correct prefix (avoids cmake/meson caching the old install
+prefix).
 
 These are the exact versions the macOS bundle ships (libvips 8.14.2 confirmed via the
 dylib's version string); matching them is what makes the produced thumbnail bytes
@@ -75,42 +93,28 @@ defined) because libvips (via `vips::VError`) and future task code may throw.
 
 ## Test
 
+Plain Node (bundled glib on the path):
 ```bash
 P=$(node nativelibs/zimage/scripts/deps-hash.js)
 LD_LIBRARY_PATH="$P/lib" ELECTRON_RUN_AS_NODE=1 \
   node_modules/.bin/electron nativelibs/zimage/__tests__/moduleReady.test.js
 ```
 
-Expected: `OK moduleReady` (proves the addon links libvips + loads under Electron ABI,
-`vips_init` succeeds).
-
-### Known issue: GObject type collision under Electron
-
-As of Task 3, `moduleReady.test.js` passes cleanly under plain Node
-(`LD_LIBRARY_PATH="$P/lib" node nativelibs/zimage/__tests__/moduleReady.test.js` →
-`OK moduleReady`) but **aborts under Electron** with:
-
-```
-GLib-GObject-CRITICAL: cannot register existing type 'gchar'
-GLib-GObject:ERROR:../gobject/gvaluetypes.c:452:_g_value_types_init: assertion failed: (type == G_TYPE_CHAR)
+Under Electron, do NOT put the whole prefix `lib/` on `LD_LIBRARY_PATH` — that would
+shadow Electron's newer system glib with our older bundled 2.78.4 (breaking Electron's
+own GTK libs). Expose only the libvips `.so` so libvips resolves glib against the
+system copy Electron already loaded (this is exactly what the `RPATH=$ORIGIN` bundle in
+`patch-zimage.js` achieves at runtime):
+```bash
+P=$(node nativelibs/zimage/scripts/deps-hash.js); T=$(mktemp -d)
+for so in "$P"/lib/libvips.so.42* "$P"/lib/libvips-cpp.so.42* "$P"/lib/libz.so*; do ln -sf "$so" "$T/"; done
+LD_LIBRARY_PATH="$T" ELECTRON_RUN_AS_NODE=1 node_modules/.bin/electron nativelibs/zimage/__tests__/moduleReady.test.js
+rm -rf "$T"
 ```
 
-Root cause (confirmed via `gdb` backtrace): the deps-prefix builds glib
-`--default-library=static`, so a full copy of GObject's type-registration code is baked
-directly into `libvips.so.42`. The `electron` binary itself directly links the
-**system** `libgobject-2.0.so.0` (for its own GTK/D-Bus use) as a hard dependency, which
-is loaded and initialized before any JS runs. When `zimage.node` is later `dlopen`'d,
-`libvips.so.42`'s embedded `gobject_init_ctor` ELF constructor runs and calls its own
-`_g_value_types_init()` — but because shared-library code is PIC/interposable by
-default, that function's internal call to `g_type_register_fundamental()` resolves via
-the PLT to the **already-loaded system** implementation (first in the process's global
-symbol scope), which rejects re-registering the fundamental type `gchar` a second time
-→ `SIGABRT`. This is a structural conflict between the prefix's static-glib design and
-any host process (like Electron) that already links system glib/GObject — it is **not**
-an addon-scaffold bug and reproduces on every load, regardless of require() timing.
+Expected (both): `OK moduleReady` (proves the addon links libvips + `vips_init`
+succeeds + loads cleanly under the Electron ABI).
 
-Fixing this requires a deps-prefix change (out of Task 3's scope): either build
-glib/gobject/gio as shared libraries in the prefix so the dynamic loader dedups against
-Electron's copy, or hide the statically-embedded glib symbols in `libvips.so`/
-`libvips-cpp.so` (e.g. a linker version script or `-Wl,--exclude-libs=ALL`) so they
-cannot interpose with the system copy.
+> The earlier "cannot register existing type 'gchar'" SIGABRT under Electron (from a
+> static glib baked into `libvips.so.42`) is **resolved** — glib is now built shared
+> (see "glib must be shared" above), so a single glib copy is used at runtime.
