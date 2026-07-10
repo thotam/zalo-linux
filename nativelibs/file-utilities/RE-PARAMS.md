@@ -29,7 +29,7 @@ and reproduced exactly in `nativelibs/file-utilities/Cargo.toml`:
 | `napi` | `2.x` (`features = ["napi8"]`, `default-features = false`) | N-API bindgen, ABI-stable surface |
 | `napi-derive` | `2.x` | `#[napi]` / `#[napi(object)]` macros |
 | `walkdir` | `=2.5.0` | recursive directory walk (size, glob, tree) |
-| `same-file` | `=1.0.6` | pulled in **transitively by `walkdir` 2.5.0** (not a direct dep of this crate — walkdir itself doesn't need it for our usage, but the version is pinned in `Cargo.lock` because the mac binary's registry strings show it linked at this exact version) |
+| `same-file` | `=1.0.6` | declared as a **direct dependency** in `Cargo.toml` (`same-file = "=1.0.6"`), pinned to match the exact version the mac binary linked; also pulled in **transitively by `walkdir` 2.5.0**. Our own hardlink dedup does **not** call `same_file::Handle` (§4 item 2 — we dedup by `(dev, ino)` directly, to avoid holding an fd open per file), so this pin exists for version-faithfulness to the original registry-string evidence, not because the crate's API is invoked directly |
 | `lazy_static` | `=1.5.0` | the `JOBS` static job registry (`shared/async_job.rs`) |
 | `globset` | `0.4` | `getDirectorySizeByGlob*` pattern matching |
 | `num_cpus` | `1` | default `workers` count when the caller omits it |
@@ -106,7 +106,8 @@ DirectoryTreeResult {
   depth: number              // u32, 0 at root
   size: number                // f64, cumulative for the subtree
   fileCount: number           // u32, cumulative for the subtree
-  children: DirectoryTreeResult[]  // omitted (not recursed into) once depth == maxDepth
+  children: DirectoryTreeResult[]  // subtree is always fully traversed for size/fileCount;
+                                    // only the emitted children array is pruned beyond maxDepth (see §4 item 5)
 }
 
 HardlinkResult {
@@ -229,6 +230,12 @@ authored fresh against the Linux `statfs(2)` ABI (`src/detect_filesystem.rs`):
 | `vfat` | no | yes | no | no |
 | `ntfs` | no | yes | yes | yes |
 | everything else / `unknown` | yes | yes | no | no |
+
+Filesystems not explicitly listed above (e.g. `nfs`, `cifs`, `fuse`, and any unrecognized
+`f_type` magic) are not special-cased in `caps()` — they intentionally fall through to its
+`_ =>` branch and get the default tuple `(case_sensitive=true, unicode=true,
+compression=false, encryption=false)`, same as `unknown`. They are **defaulted, not
+unmapped**.
 
 Other fields: `maxFilenameLength` = `f_namelen` from the same `statfs(2)` call (not a
 separate `statvfs` call, contrary to the original spec sketch — `libc::statfs` on Linux
