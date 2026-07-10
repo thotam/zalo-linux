@@ -26,4 +26,21 @@ spliceLinuxBranch(tmp);
 const out2 = fs.readFileSync(tmp, 'utf8');
 assert.strictEqual((out2.match(/case 'linux'/g) || []).length, 1, 'splice is idempotent');
 fs.unlinkSync(tmp);
-console.log('OK patch-file-utilities: splice adds linux case, idempotent');
+
+// Fail-loud: anchor missing (bundle format changed) must throw.
+const stub2 = `
+function getPlatformPath() {
+  switch (platform) {
+    case 'darwin':
+      return join(__dirname, 'darwin', 'file-utilities.node');
+    default:
+      return null;
+  }
+}
+`;
+const tmp2 = path.join(os.tmpdir(), 'fu-index2-' + process.pid + '.js');
+fs.writeFileSync(tmp2, stub2);
+assert.throws(() => spliceLinuxBranch(tmp2), /getPlatformPath.*not found/i, 'throws when anchor missing');
+fs.unlinkSync(tmp2);
+
+console.log('OK patch-file-utilities: splice adds linux case, idempotent, throws when anchor missing');
