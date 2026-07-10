@@ -39,16 +39,16 @@ cat ~/zalo-native-libs.log
 | **v8-profiles** | ⬜ app không dùng | Không hề `LOAD` (grep bundle = 0). Build được nhưng app không gọi |
 | **zfile** | ⬜ chưa kích hoạt | Không log — phiên không gửi/nhận file |
 | **file-utils** | ⚠️ native không hỗ trợ Linux | `LOAD → {error:"not support"}` — app fallback, không crash |
-| **file-utilities** | ⚠️ trả rỗng trên Linux | `LOAD → {}` (wrapper nuốt lỗi require) |
+| **file-utilities** | ✅ chạy thật (RE Rust napi-rs) | Màn **Quản lý dữ liệu/Storage** gọi thật: `getDirectorySizeByGlobAsync` ×4 (97MB/18, 9.2MB/14, 86MB/396 file…), `getDirectorySizeAsync` ×4 (556MB/591, 222MB/729 file…), và **đường tree** `getDirectorySizeAsync(_,{deep:{maxDepth:3}})` → `{depth:0,size:57456,fileCount:3,…}`. Mọi call **RESOLVE** (0 REJECT), 1–4ms. `includeRoot` không hề được set (khớp residual). |
 | **zcall / zwalker / mp4thumb** | ⬜ chưa kích hoạt | Không gọi call/video/quét cache trong phiên |
 
-**Kết luận:** 3 lib quan trọng nhất cho mục tiêu upgrade — **zjxl, zimage, sqlite3 — đã xác nhận chạy thật** trên E39. Xem thêm bảng tổng quan RE ở [RE-ROADMAP.md](RE-ROADMAP.md).
+**Kết luận:** **zjxl, zimage, sqlite3, file-utilities — đã xác nhận chạy thật** trên E39 (file-utilities verify 2026-07-10 qua màn Storage: glob + size + tree, mọi call thành công). Xem thêm bảng tổng quan RE ở [RE-ROADMAP.md](RE-ROADMAP.md).
 
 ## Ghi chú
 
 - **`status_code` khác convention mỗi hàm:** `jxlDecompressMulti` dùng **1 = SUCCESS** (`nativelibs/zjxl/__tests__/multi.test.js`), còn `decodeToJpeg`/`getJxlInfo` dùng **0 = SUCCESS**. Cả hai trong log đều là thành công.
 - **sqlite3 mở 400+ DB/~66s:** Zalo mở file DB riêng cho từng hội thoại/thread (path khác nhau) — hành vi của Zalo, không phải leak của port.
-- **file-utils / file-utilities chưa có bản Linux** → ứng viên RE tiếp theo (P2/P3 trong roadmap; file-utilities chặn màn hình Storage).
+- **file-utilities đã RE xong (Rust napi-rs, merge main 860448e)** — màn Storage giờ chạy thật (xem bảng trên). **`file-utils`** (sibling C++ `getDiskUsage`) **vẫn chưa port** → ứng viên RE tiếp theo (roadmap).
 
 ## Verify lib còn lại — thao tác cần làm
 
