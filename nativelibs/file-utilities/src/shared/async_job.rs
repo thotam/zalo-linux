@@ -1,11 +1,11 @@
 use std::collections::{HashMap, HashSet};
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use lazy_static::lazy_static;
 use napi_derive::napi;
-use same_file::Handle;
 
 lazy_static! {
     static ref JOBS: Mutex<HashMap<u32, Arc<AtomicBool>>> = Mutex::new(HashMap::new());
@@ -38,7 +38,9 @@ pub fn num_workers(requested: Option<u32>) -> usize {
 
 /// Directory walk. Returns (total_size_bytes, file_count).
 /// - total_size sums regular-file logical sizes (st_size).
-/// - hardlinks deduplicated by same_file::Handle (dev, ino).
+/// - hardlinks deduplicated by (dev, ino) taken from the already-stat'd
+///   metadata — NOT same_file::Handle, which would hold an open fd per
+///   file for the lifetime of the walk and exhaust the process ulimit.
 /// - symlinks are not followed (symlink_metadata) and not summed.
 /// - honors `cancel`: returns early with partial totals when set.
 ///
@@ -53,7 +55,7 @@ pub fn walk_size(root: &Path, _workers: usize, cancel: &AtomicBool) -> std::io::
         ));
     }
 
-    let mut seen: HashSet<Handle> = HashSet::new();
+    let mut seen: HashSet<(u64, u64)> = HashSet::new();
     let mut total = 0f64;
     let mut count = 0u32;
     let mut stack: Vec<PathBuf> = vec![root.to_path_buf()];
@@ -79,11 +81,9 @@ pub fn walk_size(root: &Path, _workers: usize, cancel: &AtomicBool) -> std::io::
             if ft.is_dir() {
                 stack.push(path);
             } else if ft.is_file() {
-                // hardlink dedup by (dev, ino) via same_file::Handle
-                if let Ok(h) = Handle::from_path(&path) {
-                    if !seen.insert(h) {
-                        continue; // already counted this inode
-                    }
+                // hardlink dedup by (dev, ino) — no open fd
+                if !seen.insert((meta.dev(), meta.ino())) {
+                    continue; // already counted this inode
                 }
                 total += meta.len() as f64;
                 count += 1;
