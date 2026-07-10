@@ -366,8 +366,8 @@ git commit -m "file-utilities: shared job registry, cancelJob, parallel walk_siz
 
 **Interfaces:**
 - Produces:
-  - `makeFixture()` → `{ root, expectedApparentBytes, expectedFileCount }` — builds a deterministic tree under an OS tmp dir: files of known sizes, one hardlinked pair, one symlink, nested subdirs (depth 3).
-  - `duApparentBytes(dir)` → number (oracle via `du --apparent-size -sb`).
+  - `makeFixture()` → `{ root }` — builds a deterministic tree under an OS tmp dir: files of known sizes (1000+2000+500+300 = 3800 total), one hardlinked pair, one symlink, nested subdirs (depth 3).
+  - `expectedFileBytes(dir)` → number (oracle via `find -type f` + `(device,inode)` dedup + `st_size` sum — matches walk_size exactly, host-independent = 3800). Do NOT use `du` (counts symlink/dir sizes walk_size ignores).
   - `findFileCount(dir)` → number (oracle via `find -type f`, hardlink-adjusted to match dedup).
   - `statNlink(file)` → number (`stat -c %h`).
   - `statfsType(path)` → string (`stat -f -c %T`).
@@ -402,15 +402,31 @@ function makeFixture() {
   return { root };
 }
 
-function duApparentBytes(dir) {
-  const out = execSync(`du --apparent-size -sb "${dir}"`).toString().trim();
-  return parseInt(out.split(/\s+/)[0], 10);
+// Independent oracle matching the addon's walk semantics EXACTLY: regular files
+// only (no directories, no symlinks — `find -type f`), hardlinks deduped by
+// (device, inode), apparent sizes (st_size) summed. Do NOT use `du`: with
+// --apparent-size it also counts each symlink's own size (the byte length of
+// its stored target path) and directory inode sizes, which walk_size does not —
+// making it both wrong and host-dependent (target length varies with tmpdir).
+function expectedFileBytes(dir) {
+  const rows = execSync(`find "${dir}" -type f -printf '%D:%i %s\\n'`).toString().trim().split('\n').filter(Boolean);
+  const seen = new Set();
+  let total = 0;
+  for (const row of rows) {
+    const sp = row.lastIndexOf(' ');
+    const key = row.slice(0, sp);        // "device:inode"
+    const size = parseInt(row.slice(sp + 1), 10);
+    if (seen.has(key)) continue;          // dedup hardlink (same device+inode)
+    seen.add(key);
+    total += size;
+  }
+  return total;
 }
 
 function findFileCount(dir) {
-  // count regular files, then subtract hardlink duplicates (same inode counted once)
-  const files = execSync(`find "${dir}" -type f -printf '%i\\n'`).toString().trim().split('\n').filter(Boolean);
-  return new Set(files).size;
+  // count regular files, deduping hardlinks by (device, inode) — one per inode
+  const rows = execSync(`find "${dir}" -type f -printf '%D:%i\\n'`).toString().trim().split('\n').filter(Boolean);
+  return new Set(rows).size;
 }
 
 function statNlink(file) {
@@ -425,16 +441,16 @@ function rmFixture(root) {
   fs.rmSync(root, { recursive: true, force: true });
 }
 
-module.exports = { makeFixture, duApparentBytes, findFileCount, statNlink, statfsType, rmFixture };
+module.exports = { makeFixture, expectedFileBytes, findFileCount, statNlink, statfsType, rmFixture };
 ```
 
 - [ ] **Step 2: Sanity-run helpers**
 
 Run:
 ```bash
-node -e "const h=require('./nativelibs/file-utilities/__tests__/helpers.js'); const {root}=h.makeFixture(); console.log('du', h.duApparentBytes(root), 'count', h.findFileCount(root), 'fs', h.statfsType(root)); h.rmFixture(root);"
+node -e "const h=require('./nativelibs/file-utilities/__tests__/helpers.js'); const {root}=h.makeFixture(); console.log('bytes', h.expectedFileBytes(root), 'count', h.findFileCount(root), 'fs', h.statfsType(root)); h.rmFixture(root);"
 ```
-Expected: prints `du 3800 count 4 fs <ext4|btrfs|...>` — `du --apparent-size` dedups the hardlink so total = 1000+2000+500+300 = 3800; unique inodes = 4 (a,b,c,d; a-link shares a's inode; symlink is not `-type f`).
+Expected: prints `bytes 3800 count 4 fs <tmpfs|ext4|btrfs|...>` — host-independent: only the 4 regular files count (1000+2000+500+300 = 3800), the hardlink `a-link.bin` dedups to a.bin's inode, and the symlink is excluded by `-type f`. If it prints anything other than `bytes 3800 count 4`, STOP and report — do not edit the fixture to match a wrong number.
 
 - [ ] **Step 3: Commit**
 
@@ -473,7 +489,7 @@ const h = require('./helpers');
 (async () => {
   const { root } = h.makeFixture();
   try {
-    const expBytes = h.duApparentBytes(root);   // 3800
+    const expBytes = h.expectedFileBytes(root);  // 3800
     const expCount = h.findFileCount(root);      // 4
 
     // sync
