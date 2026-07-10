@@ -1665,6 +1665,6 @@ Use the `superpowers:finishing-a-development-branch` skill to decide merge vs PR
 - **napi-rs prelude paths:** if `napi::bindgen_prelude::AsyncTask` / `Task` import paths differ in the resolved `napi` 2.x minor, use `use napi::bindgen_prelude::*;` at the top of each module and reference `AsyncTask`/`Task` unqualified. The `#[napi]` macro on an `impl Task` block is required for napi-derive to generate the promise glue.
 - **snake_case → camelCase:** napi-derive renames automatically. Do **not** add explicit `js_name` except where a name can't be derived (only `cancelJob` uses `js_name` here, and only because `cancel_job` → `cancelJob` is already correct — the explicit `js_name` is belt-and-suspenders; drop it if it causes a duplicate-name error).
 - **`f_namelen` field name:** on glibc `libc::statfs`, the field is `f_namelen` (i64/`__fsword_t`). If the resolved `libc` version names it differently, check `libc::statfs` docs for the target.
-- **Cargo.lock:** commit it (pins the exact dep tree — part of "faithful versions").
+- **Cargo.lock:** gitignored per user instruction (see `nativelibs/file-utilities/.gitignore`). Do NOT commit it — the `git add … Cargo.lock` fragments in later task steps are no-ops (git silently skips ignored paths) and can be omitted.
 - **Do not** run tests or the pipeline as root; fixtures live under the user's tmp.
 ```
