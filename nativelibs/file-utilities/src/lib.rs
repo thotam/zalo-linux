@@ -2,6 +2,7 @@ use napi_derive::napi;
 
 mod shared;
 mod get_directory_size;
+mod get_directory_size_glob;
 mod detect_hardlinks;
 mod detect_filesystem;
 
