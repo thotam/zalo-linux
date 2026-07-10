@@ -1,5 +1,13 @@
 const assert = require('assert');
 const addon = require('./load-addon');
-assert.strictEqual(typeof addon.ping, 'function', 'ping export missing');
-assert.strictEqual(addon.ping(), 'pong');
-console.log('OK smoke: addon loads and ping() works');
+for (const fn of [
+  'getDirectorySizeSync', 'getDirectorySizeAsync',
+  'getDirectorySizeTreeSync', 'getDirectorySizeTreeAsync',
+  'getDirectorySizeByGlobSync', 'getDirectorySizeByGlobAsync',
+  'detectHardlinksSync', 'detectHardlinksAsync',
+  'detectFilesystemSync', 'detectFilesystemAsync',
+  'cancelJob',
+]) {
+  assert.strictEqual(typeof addon[fn], 'function', `missing export: ${fn}`);
+}
+console.log('OK smoke: all 11 exports present');
