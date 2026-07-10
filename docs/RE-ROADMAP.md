@@ -23,7 +23,7 @@ Trạng thái hiện tại của `app/native/nativelibs/*`. **7 module đã port
 | **mp4thumb** | Thumbnail video | FFmpeg | ⚠️ stub (throw khi gọi) | `generateThumbnail(Async), cancel` | **P2** |
 | **zwalker** | Quét/GC cache media | Rust (NAPI-RS) | ⚠️ stub no-op (guard) | `scanDirectory, deleteHomelessFiles, deleteEmptyFolders, statUnmarkedFiles, updateReferenceMessageId` | **P2** |
 | **file-utilities** | Dung lượng thư mục, hardlink, fs-type | Rust (NAPI-RS) | ✅ **DONE (native, byte-identical output, linux_x64)** | `getDirectorySize(Sync/Async), getDirectorySizeTree(Sync/Async), getDirectorySizeByGlob(Sync/Async), detectHardlinks(Sync/Async), detectFilesystem(Sync/Async), cancelJob` | — |
-| **file-utils** | Disk usage (statvfs) | glibc | ❌ `{error:'not support'}` | `getDiskUsage` | **P3 (trivial)** |
+| **file-utils** | Disk usage (statvfs) | C++ (node-addon-api) | ✅ **DONE (native, byte-identical output, linux/x64)** | `getDiskUsage` | — |
 | **zcall** | Engine gọi thoại/video | WebRTC (Opus/AAC/H264) proprietary | ⚠️ `{error:'not support'}` | `bindCanvas, render, startRender, getActiveAudioCodecs, holdAudio, …` (~30) | **P4 (out-of-scope)** |
 
 ---
@@ -106,10 +106,16 @@ dựng lại crate Rust `napi-rs` từ string recovery trên binary macOS (branc
 - Test: `for t in smoke cancel directory-size hardlinks filesystem glob tree; do node
   __tests__/$t.test.js; done` — 7/7 pass, đối chiếu oracle coreutils.
 
-### `file-utils` — disk usage (trivial, còn UNPORTED)
-- Module **C++ addon** khác (không phải Rust `file-utilities` ở trên), expose
-  `getDiskUsage`. **Map:** dùng luôn `zfile` (đã có `statvfs`) hoặc npm
-  `check-disk-space` (đã là dep). Effort: Very low.
+### ✅ `file-utils` — disk usage — **DONE (native C++, byte-identical output)**
+- Module **C++ node-addon-api** khác (không phải Rust `file-utilities` ở trên), expose
+  **1 hàm sync** `getDiskUsage(path)` → `{available, free, total}` qua `statvfs`.
+- **RE bằng disassembly** (Capstone + Mach-O parser tự viết): công thức
+  `field * f_frsize` (available=f_bavail, free=f_bfree, total=f_blocks), thứ tự property
+  `available, free, total`, và toàn bộ error strings — xem
+  `nativelibs/file-utils/RE-PARAMS.md`.
+- **Rebuild** C++ verbatim (`src/diskusage_posix.cc`, node-gyp + node-addon-api, C++
+  exceptions ON) → byte-identical output, verify bằng C `statvfs` oracle. Deploy:
+  `patch-file-utils.js` (build → splice nhánh linux → ELF/ldd gate). Branch `re/file-utils`.
 
 ---
 
@@ -130,7 +136,7 @@ dựng lại crate Rust `napi-rs` từ string recovery trên binary macOS (branc
 ## Thứ tự đề xuất
 
 1. ~~**P1 — zjxl**~~ ✅ **DONE**. ~~**zimage**~~ ✅ **DONE** (native, byte-identical, branch `re/zimage`). Cả hai flag-gated (dormant mặc định).
-2. ~~**P2 — file-utilities**~~ ✅ **DONE** (native Rust `napi-rs`, byte-identical output, branch `re/file-utilities` — gỡ chặn màn Quản lý dữ liệu/Storage đã verify 2026-07-09). Còn lại **file-utils** (disk usage trivial, P3, sibling C++ addon khác, chưa port) → **mp4thumb** (video thumb, ffmpeg) → **zwalker** (GC, làm khi cache phình).
+2. ~~**P2 — file-utilities**~~ ✅ **DONE** (native Rust `napi-rs`, byte-identical output, branch `re/file-utilities`) · ~~**file-utils**~~ ✅ **DONE** (native C++ node-addon-api, byte-identical output, branch `re/file-utils`). Còn lại **mp4thumb** (video thumb, ffmpeg) → **zwalker** (GC, làm khi cache phình).
 3. **P4 — zcall**: đánh giá khả thi riêng; mặc định để stub.
 4. **v8-profiles**: đã build; xác minh logging/trigger (đang làm).
 
