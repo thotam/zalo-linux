@@ -50,6 +50,8 @@ async function main() {
       logger.step('Applying patches');
       await require('./patches/patch-platform-id.js').main();
       await require('./patches/patch-tray.js').main();
+      await require('./patches/patch-keep-maximized.js').main();
+      await require('./patches/patch-window-state.js').main();
       await require('./patches/patch-renderer-win32.js').main();
       await require('./patches/patch-titlebar-controls.js').main();
       await require('./patches/patch-media-viewer-controls.js').main();
