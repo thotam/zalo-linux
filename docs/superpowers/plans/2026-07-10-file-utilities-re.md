@@ -573,7 +573,6 @@ pub struct DirSizeTask {
     job_id: u32,
 }
 
-#[napi]
 impl Task for DirSizeTask {
     type Output = DirectorySizeResult;
     type JsValue = DirectorySizeResult;
@@ -742,7 +741,6 @@ pub struct HardlinkTask {
     path: String,
 }
 
-#[napi]
 impl Task for HardlinkTask {
     type Output = HardlinkResult;
     type JsValue = HardlinkResult;
@@ -926,7 +924,6 @@ pub struct FsTask {
     path: String,
 }
 
-#[napi]
 impl Task for FsTask {
     type Output = FilesystemInfo;
     type JsValue = FilesystemInfo;
@@ -1105,7 +1102,6 @@ pub struct GlobTask {
     job_id: u32,
 }
 
-#[napi]
 impl Task for GlobTask {
     type Output = DirectorySizeResult;
     type JsValue = DirectorySizeResult;
@@ -1345,7 +1341,6 @@ pub struct TreeTask {
     job_id: u32,
 }
 
-#[napi]
 impl Task for TreeTask {
     type Output = DirectoryTreeResult;
     type JsValue = DirectoryTreeResult;
@@ -1644,7 +1639,11 @@ git commit -m "ci: install Rust toolchain for file-utilities build"
 
 - [ ] **Step 1: Write `RE-PARAMS.md`**
 
-Content must document: recovered crate deps + versions; the module/API map; the byte-identical-OUTPUT fidelity model and the excluded fields; the semantics locked by TDD (totalSize = Σ st_size, hardlink dedup by (dev,ino), fileCount dedup rule, symlinks skipped); the Linux-authored `detect_filesystem` mapping table (magics + capability table) with the note that these are Linux-correct, not mac-identical; and the **residual gap**: the mac binary cross-check (run `file-utilities.node` on a Mac, diff fields) is deferred because Mach-O cannot run on Linux. List the three TDD-locked inferences (fileCount dedup, HardlinkResult shape, DirectoryTreeResult fields) explicitly as "verify on Mac if available."
+Content must document: recovered crate deps + versions (incl. that the mac binary links **tokio 1.36.0**, **walkdir 2.5.0**, **same-file 1.0.6**, **lazy_static 1.5.0**, **globset**, **napi 2.x**, rustc `25ef9e3d…`); the module/API map; the byte-identical-OUTPUT fidelity model and the excluded fields; the semantics locked by TDD (totalSize = Σ st_size, hardlink dedup by (dev,ino), fileCount dedup rule, symlinks skipped); the Linux-authored `detect_filesystem` mapping table (magics + capability table) with the note that these are Linux-correct, not mac-identical; and the **residual gaps / documented deviations**:
+- the mac binary cross-check (run `file-utilities.node` on a Mac, diff fields) is deferred because Mach-O cannot run on Linux;
+- **async engine:** the mac binary uses a **tokio 1.36.0** multi-thread runtime for async; this port uses napi `AsyncTask` (libuv threadpool). Byte-identical output either way (results don't depend on the async engine) — equivalent, simpler, not a fidelity gap;
+- **export surface:** the port exports exactly the 11 functions the mac binding exposes, with no `Task` struct classes leaked (achieved by not annotating `impl Task`).
+List the three TDD-locked inferences (fileCount dedup, HardlinkResult shape, DirectoryTreeResult fields) explicitly as "verify on Mac if available."
 
 - [ ] **Step 2: Write `README.md`**
 
@@ -1703,7 +1702,9 @@ Use the `superpowers:finishing-a-development-branch` skill to decide merge vs PR
 
 ## Notes for the implementer
 
-- **napi-rs prelude paths:** if `napi::bindgen_prelude::AsyncTask` / `Task` import paths differ in the resolved `napi` 2.x minor, use `use napi::bindgen_prelude::*;` at the top of each module and reference `AsyncTask`/`Task` unqualified. The `#[napi]` macro on an `impl Task` block is required for napi-derive to generate the promise glue.
+- **napi-rs prelude paths:** if `napi::bindgen_prelude::AsyncTask` / `Task` import paths differ in the resolved `napi` 2.x minor, use `use napi::bindgen_prelude::*;` at the top of each module and reference `AsyncTask`/`Task` unqualified.
+- **Do NOT put `#[napi]` on the `impl Task for XxxTask` block.** The `Task` trait impl is plain Rust; `AsyncTask<T>` plus the `#[napi]` on the *function* returning it generate all the promise glue. Annotating the impl (or the `XxxTask` struct) makes napi-derive additionally export `XxxTask` as a JS class — an extra export the mac binding does NOT have (verified: the mac `.node` exports only the 11 functions). Keep the struct and its `impl Task` un-annotated. (Confirmed in Task 4: dropping the attribute still compiles and removes the stray `DirSizeTask` export.)
+- **Async engine deviation (documented, not a bug):** the mac binary drives async work on a **tokio 1.36.0** multi-thread runtime. This Linux port uses napi's `AsyncTask` (libuv threadpool) instead. The async *output* is byte-identical either way — the result values do not depend on the async execution engine — so this is a simpler, equivalent implementation, not an output-fidelity gap. Record it in `RE-PARAMS.md` (Task 12) alongside the other honest residual notes.
 - **snake_case → camelCase:** napi-derive renames automatically. Do **not** add explicit `js_name` except where a name can't be derived (only `cancelJob` uses `js_name` here, and only because `cancel_job` → `cancelJob` is already correct — the explicit `js_name` is belt-and-suspenders; drop it if it causes a duplicate-name error).
 - **`f_namelen` field name:** on glibc `libc::statfs`, the field is `f_namelen` (i64/`__fsword_t`). If the resolved `libc` version names it differently, check `libc::statfs` docs for the target.
 - **Cargo.lock:** gitignored per user instruction (see `nativelibs/file-utilities/.gitignore`). Do NOT commit it — the `git add … Cargo.lock` fragments in later task steps are no-ops (git silently skips ignored paths) and can be omitted.
