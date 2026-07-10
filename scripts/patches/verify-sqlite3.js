@@ -85,8 +85,9 @@ probe().then((ver) => {
     fail('PRAGMA cipher_version returned EMPTY.\n' +
       'The built node_sqlite3.node is VANILLA sqlite3 with NO SQLCipher codec.\n' +
       'A vanilla build silently ignores "PRAGMA key" and would store the Zalo DB in PLAINTEXT.\n' +
-      'Rebuild against libsqlcipher (see scripts/patches/patch-sqlite3.js) or set ' +
-      'ZALO_SQLCIPHER_FALLBACK=1 to use the @journeyapps/sqlcipher static build.');
+      'The default build already uses the @journeyapps/sqlcipher static amalgamation; ' +
+      'if you forced the dynamic build with ZALO_SQLCIPHER_PRIMARY=1, drop it so the ' +
+      'static SQLCipher (see scripts/patches/patch-sqlite3.js) is used instead.');
   }
   fail(err.message);
 });
