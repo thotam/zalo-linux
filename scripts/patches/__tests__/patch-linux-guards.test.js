@@ -4,7 +4,35 @@ const os = require('os');
 const assert = require('assert');
 const cp = require('child_process');
 
-const REF = '/tmp/claude-1000/-mnt-data-Work-zalo-linux/4b920b94-ed2d-4cc3-95bc-d6ce8bb9f3bd/scratchpad/asar-src';
+// Self-contained loader stubs reproducing the exact anchors patch-linux-guards
+// targets (no dependency on a checked-out extraction). zwalker throws at load via
+// the final `if (!nativeBinding)` block; mp4thumb's `let thumbModule = null; try {`
+// is where the Linux short-circuit is spliced.
+const ZWALKER_STUB = [
+  'let nativeBinding = null',
+  'let loadError = null',
+  'if (!nativeBinding) {',
+  '  if (loadError) {',
+  '    throw loadError',
+  '  }',
+  '  throw new Error(`Failed to load native binding`)',
+  '}',
+  'module.exports = nativeBinding',
+  '',
+].join('\n');
+const MP4THUMB_STUB = [
+  'function load() {',
+  '    let thumbModule = null;',
+  '    try {',
+  "        thumbModule = require('./mp4thumb.node');",
+  '    } catch (e) {',
+  '        thumbModule = { getThumbnail: function () { return null; } };',
+  '    }',
+  '    return thumbModule;',
+  '}',
+  'module.exports = load();',
+  '',
+].join('\n');
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'zlg-'));
 const repo = path.join(tmp, 'repo');
@@ -17,9 +45,9 @@ fs.ensureDirSync(path.join(repo, 'scripts', 'utils'));
 const scriptsPatches = path.join(repo, 'scripts', 'patches');
 fs.ensureDirSync(scriptsPatches);
 
-// Copy real loader sources + a minimal main.js containing the checkAppSigned anchor.
-fs.copyFileSync(path.join(REF, 'native/nativelibs/zwalker/index.js'), path.join(appNL, 'zwalker', 'index.js'));
-fs.copyFileSync(path.join(REF, 'native/nativelibs/mp4thumb/index.js'), path.join(appNL, 'mp4thumb', 'index.js'));
+// Write loader stubs + a minimal main.js containing the checkAppSigned anchor.
+fs.writeFileSync(path.join(appNL, 'zwalker', 'index.js'), ZWALKER_STUB, 'utf8');
+fs.writeFileSync(path.join(appNL, 'mp4thumb', 'index.js'), MP4THUMB_STUB, 'utf8');
 fs.writeFileSync(path.join(appMD, 'main.js'),
   'class C{async checkAppSigned(){return null!=this.isAppSigned?this.isAppSigned:!1}}\nmodule.exports=C;', 'utf8');
 

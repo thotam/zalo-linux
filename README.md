@@ -35,7 +35,7 @@ sudo apt install -y build-essential libssl-dev liblzma-dev libsqlcipher-dev \
 
 # building the native modules from source (zjxl / zimage / v8-profiles / …)
 sudo apt install -y cmake meson ninja-build pkg-config libtool autoconf \
-  automake nasm patchelf clang git wget unzip python3
+  automake gettext autopoint nasm patchelf clang git wget unzip python3
 ```
 
 The native build scripts under `nativelibs/*/scripts/` also auto-install a few
