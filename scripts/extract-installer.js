@@ -26,8 +26,12 @@ function resolveDmg() {
 }
 
 async function main() {
-  if (!commandExists('7z')) {
-    throw new Error('7z not installed. Run: sudo apt-get install -y p7zip-full');
+  // Prefer modern 7-Zip (`7zz`, the `7zip` package) over legacy p7zip (`7z`, 16.02).
+  // p7zip 16.02 — the version on Ubuntu 22.04 — chokes on Zalo's DMG with
+  // "Headers Error" (it can't read the modern DMG compression); 7zz reads it fine.
+  const sevenZip = commandExists('7zz') ? '7zz' : (commandExists('7z') ? '7z' : null);
+  if (!sevenZip) {
+    throw new Error('No 7-Zip found. Run: sudo apt-get install -y 7zip (preferred) or p7zip-full');
   }
 
   const dmgPath = resolveDmg();
@@ -44,7 +48,7 @@ async function main() {
   // ("Zalo <ver>-universal"), so the glob keeps a wildcard before Zalo.app.
   logger.info('Extracting app.asar and app.asar.unpacked from DMG...');
   execSync(
-    `7z x "${dmgPath}" "Zalo*/Zalo.app/Contents/Resources/app.asar" "Zalo*/Zalo.app/Contents/Resources/app.asar.unpacked/*" -o"${work}" -y`,
+    `${sevenZip} x "${dmgPath}" "Zalo*/Zalo.app/Contents/Resources/app.asar" "Zalo*/Zalo.app/Contents/Resources/app.asar.unpacked/*" -o"${work}" -y`,
     { stdio: 'pipe' }
   );
 

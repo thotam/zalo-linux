@@ -37,6 +37,19 @@ jobs:
             python3 python3-pil \
             meson pkg-config autoconf automake libtool gettext autopoint libglib2.0-dev-bin
 
+      - name: Ensure modern 7-Zip (7zz)
+        # Ubuntu 22.04 only ships legacy p7zip 16.02 (`7z`), which fails to read
+        # Zalo's DMG ("Headers Error"). extract-installer.js prefers `7zz`; make sure
+        # it exists. Try the `7zip` apt package, else drop in the official static build.
+        run: |
+          if command -v 7zz >/dev/null; then 7zz i | head -2; exit 0; fi
+          if sudo apt-get install -y 7zip && command -v 7zz >/dev/null; then 7zz i | head -2; exit 0; fi
+          echo "apt 7zip unavailable — fetching static 7zz"
+          curl -fL https://www.7-zip.org/a/7z2409-linux-x64.tar.xz -o /tmp/7z.tar.xz
+          tar -C /tmp -xJf /tmp/7z.tar.xz 7zz
+          sudo install -m 755 /tmp/7zz /usr/local/bin/7zz
+          7zz i | head -2
+
       - name: Install npm deps
         run: npm install --no-audit --no-fund
 
