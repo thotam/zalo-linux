@@ -1,6 +1,6 @@
 # Roadmap — Reverse-engineering the remaining native modules (Linux)
 
-Trạng thái hiện tại của `app/native/nativelibs/*`. **5 module đã port** (build/relink cho Linux); **6 module proprietary** còn lại chỉ có prebuilt darwin/win → hiện **guard/stub** (không crash) và cần RE để chạy thật trên Linux.
+Trạng thái hiện tại của `app/native/nativelibs/*`. **7 module đã port** (build/relink cho Linux); **4 module** còn lại chỉ có prebuilt darwin/win → hiện **guard/stub** (không crash) và cần RE để chạy thật trên Linux.
 
 > **Phát hiện quan trọng (2026-07-09) — feature-flag gating:** app Zalo route resize/decode ảnh qua nhiều resizer (Canvas 2D, WASM, native) và chọn bằng **remote-config flags mặc định OFF**: `image_resizer.enable_libvips_macos`, `offload_config.enable_offload_lipvips_resize` (zimage), `enable_offload_{jxl_resize,decode_jxl,encode_jxl}` (zjxl). Vì vậy **mặc định app KHÔNG gọi zimage/zjxl** — dùng Chromium/canvas/WASM. Đây là thiết kế của Zalo (rollout dần từ server), **không phải lỗi port**. Đã verify: khi ép các flag = true, cả zimage (thumbnail JPEG/PNG thật, 2–110ms) và zjxl (decode/resize JXL) chạy đúng trong app thật, **zero crash**. Chi tiết cơ chế + cách ép flag để test: xem memory `zalo-native-lib-feature-flags`.
 
@@ -22,7 +22,7 @@ Trạng thái hiện tại của `app/native/nativelibs/*`. **5 module đã port
 | **v8-profiles** | CPU profiler | v8-profiler (NAN, raw-V8) | ✅ DONE (build) | — | — |
 | **mp4thumb** | Thumbnail video | FFmpeg | ⚠️ stub (throw khi gọi) | `generateThumbnail(Async), cancel` | **P2** |
 | **zwalker** | Quét/GC cache media | Rust (NAPI-RS) | ⚠️ stub no-op (guard) | `scanDirectory, deleteHomelessFiles, deleteEmptyFolders, statUnmarkedFiles, updateReferenceMessageId` | **P2** |
-| **file-utilities** | Dung lượng thư mục, hardlink, fs-type | Rust (NAPI-RS) | ❌ throw `Unsupported OS: linux` → barrel `{}` | `getDirectorySize(Sync/Async/ByGlob), detectHardlinks*, detectFilesystem*` | **P2 (chặn màn Storage)** |
+| **file-utilities** | Dung lượng thư mục, hardlink, fs-type | Rust (NAPI-RS) | ✅ **DONE (native, byte-identical output, linux_x64)** | `getDirectorySize(Sync/Async), getDirectorySizeTree(Sync/Async), getDirectorySizeByGlob(Sync/Async), detectHardlinks(Sync/Async), detectFilesystem(Sync/Async), cancelJob` | — |
 | **file-utils** | Disk usage (statvfs) | glibc | ❌ `{error:'not support'}` | `getDiskUsage` | **P3 (trivial)** |
 | **zcall** | Engine gọi thoại/video | WebRTC (Opus/AAC/H264) proprietary | ⚠️ `{error:'not support'}` | `bindCanvas, render, startRender, getActiveAudioCodecs, holdAudio, …` (~30) | **P4 (out-of-scope)** |
 
@@ -70,13 +70,46 @@ Chọn hướng **RE native + libvips từ source** (giống zjxl), không dùng
 
 ## Phase 3 — Storage stats (P3, dễ)
 
-### `file-utils` — disk usage (trivial)
-- **API:** `getDiskUsage(path)`. **Map:** dùng luôn `zfile` (đã có `statvfs`) hoặc npm `check-disk-space` (đã là dep). Effort: Very low.
+### ✅ `file-utilities` — dir size / hardlink / fs-type (Rust) — **DONE (native, byte-identical output, linux_x64)**
 
-### `file-utilities` — dir size / hardlink / fs-type (Rust)
-- **API:** `getDirectorySize(Sync/Async)`, `getDirectorySizeByGlob*`, `detectHardlinks*`, `detectFilesystem*`.
-- **Map JS:** dir size = `fs` walk cộng dồn `stat().size` (glob dùng `fast-glob`, đã là dep); hardlink = `stat().nlink > 1` / so `ino`; fs-type = đọc `/proc/mounts` hoặc `statfs`.
-- Effort: Low–Med. Hiện barrel nuốt lỗi → màn thống kê dung lượng chỉ thiếu số liệu, không crash.
+Không đi hướng "reimplement JS thuần" như dự tính ban đầu — đã **RE native đầy đủ**
+dựng lại crate Rust `napi-rs` từ string recovery trên binary macOS (branch
+`re/file-utilities`, `docs/superpowers/specs/2026-07-10-file-utilities-re-design.md`,
+`docs/superpowers/plans/2026-07-10-file-utilities-re.md`):
+- Addon **Rust `napi-rs`** (`nativelibs/file-utilities/`), pin đúng version crate lấy từ
+  string binary mac: `napi`/`napi-derive` 2.x (`napi8` feature — N-API 8, chạy được trên
+  Electron 39 = N-API 10), `walkdir 2.5.0`, `same-file 1.0.6` (transitive qua walkdir),
+  `lazy_static 1.5.0`, `globset 0.4`, `num_cpus`. `Cargo.lock` gitignore (pin version
+  trong `Cargo.toml` bằng `=`).
+- **Đủ 11 export** (không chỉ tập con app đang gọi): `getDirectorySize(Sync/Async)`,
+  `getDirectorySizeTree(Sync/Async)`, `getDirectorySizeByGlob(Sync/Async)`,
+  `detectHardlinks(Sync/Async)`, `detectFilesystem(Sync/Async)`, `cancelJob`. Không lộ
+  `Task` struct nào ra JS surface (khớp binding mac — chỉ 11 hàm phẳng).
+- **Byte-identical OUTPUT** (không phải byte-identical binary — Mach-O không chạy trên
+  Linux, cùng caveat như zimage/zjxl): verify bằng oracle độc lập `du --apparent-size
+  -sb`, `find -type f | wc -l`, `stat -c %h`, `stat -f -c %T` qua TDD
+  (`nativelibs/file-utilities/__tests__/`). Semantics khoá qua TDD: `totalSize` = Σ
+  `st_size` file thường; dedup hardlink theo `(dev, ino)` (không dùng
+  `same_file::Handle` — tránh exhaust fd trên cây lớn); symlink bị loại; `fileCount` =
+  số file thường theo inode duy nhất.
+- `detectFilesystem` **tự author cho Linux** (statfs `f_type` magic → tên fs + bảng
+  capability) — đúng cho Linux, **không** đối chiếu byte-cho-byte với mac (mac dùng
+  APFS/HFS+ semantics khác hẳn).
+- **Residual gaps** (đã ghi rõ trong `RE-PARAMS.md` §7, chờ máy mac nếu có): shape chính
+  xác `HardlinkResult`/`DirectoryTreeResult`, rule dedup `fileCount`,
+  `DirectoryTreeOptions.includeRoot` (nhận nhưng chưa dùng — luôn emit root),
+  `literal_separator` chính xác mac dùng cho glob `*` (port hiện dùng default
+  `globset` → `*` match qua `/`), hành vi `detectHardlinks` trên symlink gãy.
+- Deploy: `scripts/patches/patch-file-utilities.js` (theo mẫu `patch-zjxl.js`) build
+  `cargo build --release` → `linux_x64/file-utilities.node`, splice nhánh `linux` vào
+  `getPlatformPath()`, verify ELF + `ldd` chỉ system lib.
+- Test: `for t in smoke cancel directory-size hardlinks filesystem glob tree; do node
+  __tests__/$t.test.js; done` — 7/7 pass, đối chiếu oracle coreutils.
+
+### `file-utils` — disk usage (trivial, còn UNPORTED)
+- Module **C++ addon** khác (không phải Rust `file-utilities` ở trên), expose
+  `getDiskUsage`. **Map:** dùng luôn `zfile` (đã có `statvfs`) hoặc npm
+  `check-disk-space` (đã là dep). Effort: Very low.
 
 ---
 
@@ -97,7 +130,7 @@ Chọn hướng **RE native + libvips từ source** (giống zjxl), không dùng
 ## Thứ tự đề xuất
 
 1. ~~**P1 — zjxl**~~ ✅ **DONE**. ~~**zimage**~~ ✅ **DONE** (native, byte-identical, branch `re/zimage`). Cả hai flag-gated (dormant mặc định).
-2. **P2 — file-utilities + file-utils** (đã lên P2): **chặn màn Quản lý dữ liệu/Storage** trên Linux (verified 2026-07-09 — flow gọi `getDirectorySizeAsync`/`detectFilesystem` trên `{}` → hỏng, zfile không được chạm tới). Map JS thuần (fs walk + statvfs), không cần byte-identical. → **mp4thumb** (video thumb, ffmpeg) → **zwalker** (GC, làm khi cache phình).
+2. ~~**P2 — file-utilities**~~ ✅ **DONE** (native Rust `napi-rs`, byte-identical output, branch `re/file-utilities` — gỡ chặn màn Quản lý dữ liệu/Storage đã verify 2026-07-09). Còn lại **file-utils** (disk usage trivial, P3, sibling C++ addon khác, chưa port) → **mp4thumb** (video thumb, ffmpeg) → **zwalker** (GC, làm khi cache phình).
 3. **P4 — zcall**: đánh giá khả thi riêng; mặc định để stub.
 4. **v8-profiles**: đã build; xác minh logging/trigger (đang làm).
 
