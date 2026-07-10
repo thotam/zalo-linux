@@ -48,7 +48,6 @@ pub struct DirSizeTask {
     job_id: u32,
 }
 
-#[napi]
 impl Task for DirSizeTask {
     type Output = DirectorySizeResult;
     type JsValue = DirectorySizeResult;
