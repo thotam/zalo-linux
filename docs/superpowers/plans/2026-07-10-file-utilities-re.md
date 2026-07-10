@@ -69,7 +69,7 @@ App wrapper `app/native/nativelibs/file-utilities/index.js` is **gitignored** (e
 ```js
 const path = require('path');
 const assert = require('assert');
-const addon = require(path.join(__dirname, '..', 'target', 'release', 'libfile_utilities.so'));
+const addon = require('./load-addon');
 assert.strictEqual(typeof addon.ping, 'function', 'ping export missing');
 assert.strictEqual(addon.ping(), 'pong');
 console.log('OK smoke: addon loads and ping() works');
@@ -164,6 +164,8 @@ git commit -m "file-utilities: scaffold napi-rs crate, loadable .node smoke test
 ### Task 2: Shared job registry + parallel walk primitive
 
 **Files:**
+- Create: `nativelibs/file-utilities/__tests__/load-addon.js` (shared addon loader)
+- Modify: `nativelibs/file-utilities/__tests__/smoke.test.js` (use the shared loader)
 - Create: `nativelibs/file-utilities/src/shared/mod.rs`
 - Create: `nativelibs/file-utilities/src/shared/async_job.rs`
 - Modify: `nativelibs/file-utilities/src/lib.rs`
@@ -171,20 +173,44 @@ git commit -m "file-utilities: scaffold napi-rs crate, loadable .node smoke test
 
 **Interfaces:**
 - Produces:
+  - `__tests__/load-addon.js` — `module.exports` = the built addon. Node's `require()` only auto-registers the `.node` extension, not the cdylib's `.so` name, so this module aliases it once (`require.extensions['.so'] = require.extensions['.node']`) and every test file requires `./load-addon` instead of duplicating the shim.
   - `cancelJob(jobId: u32)` napi export.
   - `pub fn register_job(job_id: u32) -> Arc<AtomicBool>` — registers a cancel flag.
   - `pub fn unregister_job(job_id: u32)`.
   - `pub fn num_workers(requested: Option<u32>) -> usize` — `requested` clamped to ≥1, default `num_cpus::get()`.
   - `pub fn walk_size(root: &Path, _workers: usize, cancel: &AtomicBool) -> Result<(f64, u32), std::io::Error>` — dir walk returning `(total_size_bytes, file_count)`, dedup hardlinks by `same_file::Handle`, honoring `cancel`. Single-threaded: thread count does not affect output (sums are commutative), so `workers` is accepted for API parity but the walk is deterministic and unthreaded — byte-identical output without concurrency hazards.
 
+- [ ] **Step 0: Create the shared addon loader and refactor smoke.test.js**
+
+`nativelibs/file-utilities/__tests__/load-addon.js`:
+
+```js
+// Load the cargo-built cdylib as a Node native addon.
+// Node's require() only auto-registers the ".node" extension, not the cdylib's
+// ".so" name, so alias it once here. Every test file requires this module
+// instead of duplicating the shim.
+const path = require('path');
+require.extensions['.so'] = require.extensions['.node'];
+module.exports = require(path.join(__dirname, '..', 'target', 'release', 'libfile_utilities.so'));
+```
+
+Refactor the existing `nativelibs/file-utilities/__tests__/smoke.test.js` to use it — replace the first three lines with:
+
+```js
+const assert = require('assert');
+const addon = require('./load-addon');
+```
+
+Run: `node nativelibs/file-utilities/__tests__/smoke.test.js`
+Expected: still `OK smoke: addon loads and ping() works` (no regression).
+
 - [ ] **Step 1: Write the failing test**
 
 `nativelibs/file-utilities/__tests__/cancel.test.js`:
 
 ```js
-const path = require('path');
 const assert = require('assert');
-const addon = require(path.join(__dirname, '..', 'target', 'release', 'libfile_utilities.so'));
+const addon = require('./load-addon');
 assert.strictEqual(typeof addon.cancelJob, 'function', 'cancelJob export missing');
 // cancelJob on an unknown id must be a no-op (no throw).
 addon.cancelJob(999999);
@@ -439,7 +465,7 @@ git commit -m "file-utilities: test helpers (fixture builder + coreutils oracles
 ```js
 const path = require('path');
 const assert = require('assert');
-const addon = require(path.join(__dirname, '..', 'target', 'release', 'libfile_utilities.so'));
+const addon = require('./load-addon');
 const h = require('./helpers');
 
 (async () => {
@@ -616,7 +642,7 @@ git commit -m "file-utilities: getDirectorySize{Sync,Async} byte-matching du/fin
 ```js
 const path = require('path');
 const assert = require('assert');
-const addon = require(path.join(__dirname, '..', 'target', 'release', 'libfile_utilities.so'));
+const addon = require('./load-addon');
 const h = require('./helpers');
 
 (async () => {
@@ -752,7 +778,7 @@ git commit -m "file-utilities: detectHardlinks{Sync,Async} matching stat nlink"
 ```js
 const path = require('path');
 const assert = require('assert');
-const addon = require(path.join(__dirname, '..', 'target', 'release', 'libfile_utilities.so'));
+const addon = require('./load-addon');
 const h = require('./helpers');
 
 (async () => {
@@ -937,7 +963,7 @@ git commit -m "file-utilities: detectFilesystem{Sync,Async} (Linux statfs mappin
 ```js
 const path = require('path');
 const assert = require('assert');
-const addon = require(path.join(__dirname, '..', 'target', 'release', 'libfile_utilities.so'));
+const addon = require('./load-addon');
 const h = require('./helpers');
 
 (async () => {
@@ -1135,7 +1161,7 @@ git commit -m "file-utilities: getDirectorySizeByGlob{Sync,Async} via globset"
 ```js
 const path = require('path');
 const assert = require('assert');
-const addon = require(path.join(__dirname, '..', 'target', 'release', 'libfile_utilities.so'));
+const addon = require('./load-addon');
 const h = require('./helpers');
 
 (async () => {
@@ -1350,9 +1376,8 @@ mod detect_filesystem;
 Modify `nativelibs/file-utilities/__tests__/smoke.test.js` — replace the `ping` assertion with a real export check:
 
 ```js
-const path = require('path');
 const assert = require('assert');
-const addon = require(path.join(__dirname, '..', 'target', 'release', 'libfile_utilities.so'));
+const addon = require('./load-addon');
 for (const fn of [
   'getDirectorySizeSync', 'getDirectorySizeAsync',
   'getDirectorySizeTreeSync', 'getDirectorySizeTreeAsync',
@@ -1667,4 +1692,5 @@ Use the `superpowers:finishing-a-development-branch` skill to decide merge vs PR
 - **`f_namelen` field name:** on glibc `libc::statfs`, the field is `f_namelen` (i64/`__fsword_t`). If the resolved `libc` version names it differently, check `libc::statfs` docs for the target.
 - **Cargo.lock:** gitignored per user instruction (see `nativelibs/file-utilities/.gitignore`). Do NOT commit it — the `git add … Cargo.lock` fragments in later task steps are no-ops (git silently skips ignored paths) and can be omitted.
 - **Do not** run tests or the pipeline as root; fixtures live under the user's tmp.
+- **Addon loading in tests:** every `__tests__/*.test.js` loads the addon via `require('./load-addon')` (created in Task 2), never by requiring the `.so` directly. Node's `require()` only auto-registers `.node`, so `load-addon.js` aliases the `.so` extension once. Do not duplicate that shim in individual test files.
 ```
