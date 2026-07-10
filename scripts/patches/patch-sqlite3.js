@@ -116,7 +116,12 @@ function bundleSqlcipherClosure(nodePath, destDir) {
   const needed = execSync(`readelf -d "${nodePath}"`, { encoding: 'utf8' })
     .split('\n').filter(l => /NEEDED/.test(l)).map(l => l.replace(/.*\[(.*)\].*/, '$1'));
   if (!needed.some(n => /libsqlcipher/i.test(n))) {
-    logger.dim('sqlite3: static SQLCipher (no libsqlcipher to bundle)');
+    // Static build needs no bundled .so — sweep any left behind by a previous
+    // dynamic (PRIMARY) build so the .deb doesn't carry dead libraries.
+    for (const f of fs.readdirSync(destDir)) {
+      if (/\.so(\.|$)/.test(f)) fs.removeSync(path.join(destDir, f));
+    }
+    logger.dim('sqlite3: static SQLCipher (no libsqlcipher to bundle, swept stale .so)');
     return [];
   }
   const ldd = execSync(`ldd "${nodePath}"`, { encoding: 'utf8' }).split('\n');
@@ -148,10 +153,16 @@ function bundleSqlcipherClosure(nodePath, destDir) {
 }
 
 async function main() {
+  // Default = the pinned static SQLCipher amalgamation (FALLBACK_SPEC). This makes the
+  // bundled DB engine DETERMINISTIC across every build regardless of the build distro,
+  // so upgrading between releases (or switching build boxes) never swaps the SQLCipher
+  // version out from under an existing DB — the failure mode that corrupted sync when a
+  // DB written by one distro's libsqlcipher was later opened by another's. The static
+  // .node's only runtime dep is libcrypto.so.3 (OpenSSL 3, universal), so it stays
+  // portable. Set ZALO_SQLCIPHER_PRIMARY=1 for the old dynamic build that links the host
+  // distro's libsqlcipher (version varies per distro — non-deterministic, dev only).
   let built;
-  if (process.env.ZALO_SQLCIPHER_FALLBACK === '1') {
-    built = buildFallback();
-  } else {
+  if (process.env.ZALO_SQLCIPHER_PRIMARY === '1') {
     try {
       built = buildPrimary();
     } catch (e) {
@@ -159,6 +170,8 @@ async function main() {
       logger.warn('Falling back to ' + FALLBACK_SPEC + '...');
       built = buildFallback();
     }
+  } else {
+    built = buildFallback();
   }
   if (!fs.existsSync(built)) throw new Error('SQLCipher build produced no node_sqlite3.node at ' + built);
 
