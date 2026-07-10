@@ -178,7 +178,7 @@ git commit -m "file-utilities: scaffold napi-rs crate, loadable .node smoke test
   - `pub fn register_job(job_id: u32) -> Arc<AtomicBool>` — registers a cancel flag.
   - `pub fn unregister_job(job_id: u32)`.
   - `pub fn num_workers(requested: Option<u32>) -> usize` — `requested` clamped to ≥1, default `num_cpus::get()`.
-  - `pub fn walk_size(root: &Path, _workers: usize, cancel: &AtomicBool) -> Result<(f64, u32), std::io::Error>` — dir walk returning `(total_size_bytes, file_count)`, dedup hardlinks by `same_file::Handle`, honoring `cancel`. Single-threaded: thread count does not affect output (sums are commutative), so `workers` is accepted for API parity but the walk is deterministic and unthreaded — byte-identical output without concurrency hazards.
+  - `pub fn walk_size(root: &Path, _workers: usize, cancel: &AtomicBool) -> Result<(f64, u32), std::io::Error>` — dir walk returning `(total_size_bytes, file_count)`, dedup hardlinks by `(dev, ino)` (NOT `same_file::Handle` — that holds an open fd per file and exhausts the ulimit on large trees), honoring `cancel`. Single-threaded: thread count does not affect output (sums are commutative), so `workers` is accepted for API parity but the walk is deterministic and unthreaded — byte-identical output without concurrency hazards.
 
 - [ ] **Step 0: Create the shared addon loader and refactor smoke.test.js**
 
@@ -234,13 +234,13 @@ pub mod async_job;
 
 ```rust
 use std::collections::{HashMap, HashSet};
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use lazy_static::lazy_static;
 use napi_derive::napi;
-use same_file::Handle;
 
 lazy_static! {
     static ref JOBS: Mutex<HashMap<u32, Arc<AtomicBool>>> = Mutex::new(HashMap::new());
@@ -273,7 +273,11 @@ pub fn num_workers(requested: Option<u32>) -> usize {
 
 /// Directory walk. Returns (total_size_bytes, file_count).
 /// - total_size sums regular-file logical sizes (st_size).
-/// - hardlinks deduplicated by same_file::Handle (dev, ino).
+/// - hardlinks deduplicated by (dev, ino) taken from the metadata we already
+///   stat'd — NOT by same_file::Handle, which would hold an open fd per unique
+///   file and exhaust the fd ulimit on large trees (silently corrupting the
+///   total). The (dev, ino) tuple is the same identity same_file uses, minus
+///   the open fd.
 /// - symlinks are not followed (symlink_metadata) and not summed.
 /// - honors `cancel`: returns early with partial totals when set.
 ///
@@ -288,7 +292,7 @@ pub fn walk_size(root: &Path, _workers: usize, cancel: &AtomicBool) -> std::io::
         ));
     }
 
-    let mut seen: HashSet<Handle> = HashSet::new();
+    let mut seen: HashSet<(u64, u64)> = HashSet::new();
     let mut total = 0f64;
     let mut count = 0u32;
     let mut stack: Vec<PathBuf> = vec![root.to_path_buf()];
@@ -314,11 +318,9 @@ pub fn walk_size(root: &Path, _workers: usize, cancel: &AtomicBool) -> std::io::
             if ft.is_dir() {
                 stack.push(path);
             } else if ft.is_file() {
-                // hardlink dedup by (dev, ino) via same_file::Handle
-                if let Ok(h) = Handle::from_path(&path) {
-                    if !seen.insert(h) {
-                        continue; // already counted this inode
-                    }
+                // hardlink dedup by (dev, ino) — no open fd
+                if !seen.insert((meta.dev(), meta.ino())) {
+                    continue; // already counted this inode
                 }
                 total += meta.len() as f64;
                 count += 1;
@@ -950,7 +952,7 @@ git commit -m "file-utilities: detectFilesystem{Sync,Async} (Linux statfs mappin
 - Test: `nativelibs/file-utilities/__tests__/glob.test.js`
 
 **Interfaces:**
-- Consumes: `DirectorySizeOptions`, `DirectorySizeResult` from `get_directory_size`; `same_file::Handle` dedup.
+- Consumes: `DirectorySizeOptions`, `DirectorySizeResult` from `get_directory_size`; `(dev, ino)` hardlink dedup (same approach as `walk_size`).
 - Produces:
   - `getDirectorySizeByGlobSync(pattern: String, options: Option<DirectorySizeOptions>) -> Result<DirectorySizeResult>`
   - `getDirectorySizeByGlobAsync(pattern: String, options: Option<DirectorySizeOptions>, jobId: u32) -> AsyncTask<GlobTask>`
@@ -1002,6 +1004,7 @@ Expected: FAIL — `getDirectorySizeByGlobSync` is not a function.
 
 ```rust
 use std::collections::HashSet;
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -1010,7 +1013,6 @@ use std::time::Instant;
 use globset::Glob;
 use napi::{Env, Result, Task};
 use napi_derive::napi;
-use same_file::Handle;
 use walkdir::WalkDir;
 
 use crate::get_directory_size::{DirectorySizeOptions, DirectorySizeResult};
@@ -1041,7 +1043,7 @@ fn compute(pattern: &str, _workers: usize, cancel: &AtomicBool) -> Result<Direct
     let base = base_dir(pattern);
     let mut total = 0f64;
     let mut count = 0u32;
-    let mut seen: HashSet<Handle> = HashSet::new();
+    let mut seen: HashSet<(u64, u64)> = HashSet::new();
 
     for entry in WalkDir::new(&base).into_iter().filter_map(|e| e.ok()) {
         if cancel.load(std::sync::atomic::Ordering::SeqCst) {
@@ -1053,12 +1055,11 @@ fn compute(pattern: &str, _workers: usize, cancel: &AtomicBool) -> Result<Direct
         if !glob.is_match(entry.path()) {
             continue;
         }
-        if let Ok(h) = Handle::from_path(entry.path()) {
-            if !seen.insert(h) {
+        if let Ok(meta) = entry.metadata() {
+            // hardlink dedup by (dev, ino) — no open fd (see walk_size rationale)
+            if !seen.insert((meta.dev(), meta.ino())) {
                 continue;
             }
-        }
-        if let Ok(meta) = entry.metadata() {
             total += meta.len() as f64;
             count += 1;
         }
@@ -1206,13 +1207,13 @@ Expected: FAIL — `getDirectorySizeTreeSync` is not a function.
 
 ```rust
 use std::collections::HashSet;
+use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use napi::{Env, Result, Task};
 use napi_derive::napi;
-use same_file::Handle;
 
 use crate::shared::async_job::{register_job, unregister_job};
 
@@ -1241,7 +1242,7 @@ fn build(
     root: &Path,
     depth: u32,
     max_depth: u32,
-    seen: &Mutex<HashSet<Handle>>,
+    seen: &Mutex<HashSet<(u64, u64)>>,
     cancel: &AtomicBool,
 ) -> DirectoryTreeResult {
     let name = dir
@@ -1276,10 +1277,9 @@ fn build(
                     children.push(child);
                 }
             } else if ft.is_file() {
-                if let Ok(h) = Handle::from_path(&path) {
-                    if !seen.lock().unwrap().insert(h) {
-                        continue;
-                    }
+                // hardlink dedup by (dev, ino) — no open fd (see walk_size rationale)
+                if !seen.lock().unwrap().insert((meta.dev(), meta.ino())) {
+                    continue;
                 }
                 size += meta.len() as f64;
                 file_count += 1;
