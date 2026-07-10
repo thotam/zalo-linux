@@ -96,6 +96,57 @@ function buildFallback() {
   return path.join(jdir, 'build', 'Release', 'node_sqlite3.node');
 }
 
+// Libraries we deliberately DON'T bundle: the glibc/gcc runtime (bundling it breaks
+// more than it fixes) and OpenSSL (libcrypto/libssl.so.3 — universal on every modern
+// distro at a stable soname). Everything else in the closure gets bundled.
+const BASELINE_SONAMES = new Set([
+  'libc.so.6', 'libm.so.6', 'libdl.so.2', 'libpthread.so.0', 'librt.so.1',
+  'libgcc_s.so.1', 'libstdc++.so.6', 'ld-linux-x86-64.so.2', 'libresolv.so.2',
+  'linux-vdso.so.1', 'libcrypto.so.3', 'libssl.so.3',
+]);
+
+// The PRIMARY build dynamically links the *system* libsqlcipher, whose soname differs
+// per distro (Ubuntu 24.04 -> libsqlcipher.so.1, 26.04 -> .so.2). A .deb built on one
+// box then fails to load on another — the app hangs at "Đang đăng nhập" because it
+// can't open its SQLCipher DB. So bundle libsqlcipher's non-baseline .so closure next
+// to node_sqlite3.node and set RPATH=$ORIGIN (same approach as zjxl/zimage), making the
+// addon self-contained apart from OpenSSL. No-op for the static FALLBACK build (which
+// links no libsqlcipher).
+function bundleSqlcipherClosure(nodePath, destDir) {
+  const needed = execSync(`readelf -d "${nodePath}"`, { encoding: 'utf8' })
+    .split('\n').filter(l => /NEEDED/.test(l)).map(l => l.replace(/.*\[(.*)\].*/, '$1'));
+  if (!needed.some(n => /libsqlcipher/i.test(n))) {
+    logger.dim('sqlite3: static SQLCipher (no libsqlcipher to bundle)');
+    return [];
+  }
+  const ldd = execSync(`ldd "${nodePath}"`, { encoding: 'utf8' }).split('\n');
+  const bundled = [];
+  for (const line of ldd) {
+    const m = line.match(/^\s*(\S+)\s*=>\s*(\/\S+)\s/);
+    if (!m) continue;
+    const soname = m[1];
+    if (BASELINE_SONAMES.has(soname)) continue;
+    const real = fs.realpathSync(m[2]);
+    fs.copyFileSync(real, path.join(destDir, soname));
+    bundled.push(soname);
+  }
+  if (!bundled.some(s => /libsqlcipher/i.test(s))) {
+    throw new Error('patch-sqlite3: libsqlcipher NEEDED but not resolved by ldd — cannot bundle');
+  }
+  // RPATH=$ORIGIN on the addon and every bundled .so so inter-library refs resolve
+  // to siblings, not the host's system libs.
+  execSync(`patchelf --set-rpath '$ORIGIN' "${nodePath}"`, { stdio: 'inherit' });
+  for (const so of bundled) {
+    execSync(`patchelf --set-rpath '$ORIGIN' "${path.join(destDir, so)}"`, { stdio: 'inherit' });
+  }
+  const dyn = execSync(`readelf -d "${nodePath}"`, { encoding: 'utf8' });
+  if (!/(RUNPATH|RPATH).*\$ORIGIN/.test(dyn)) {
+    throw new Error('patch-sqlite3: node_sqlite3.node has no RUNPATH=$ORIGIN after patchelf');
+  }
+  logger.dim(`Bundled ${bundled.length} .so: ${bundled.join(', ')}`);
+  return bundled;
+}
+
 async function main() {
   let built;
   if (process.env.ZALO_SQLCIPHER_FALLBACK === '1') {
@@ -114,6 +165,10 @@ async function main() {
   fs.ensureDirSync(DEST_DIR);
   fs.copyFileSync(built, DEST_NODE);
   logger.success('Installed SQLCipher node_sqlite3.node -> ' + DEST_NODE);
+
+  // Bundle libsqlcipher's .so closure + RPATH=$ORIGIN so the addon is portable across
+  // distros (no dependency on the host's system libsqlcipher soname).
+  bundleSqlcipherClosure(DEST_NODE, DEST_DIR);
 
   // Fail-loud codec verification (child process so its exit code is captured, not our own).
   logger.info('Verifying SQLCipher codec is active...');
