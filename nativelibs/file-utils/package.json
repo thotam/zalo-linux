@@ -1,0 +1,9 @@
+{
+  "name": "file-utils-linux",
+  "version": "1.0.0",
+  "description": "Linux reimplementation of Zalo file-utils native addon (getDiskUsage via statvfs)",
+  "main": "index.js",
+  "private": true,
+  "scripts": { "build": "node-gyp configure build" },
+  "dependencies": { "node-addon-api": "^5.0.0" }
+}

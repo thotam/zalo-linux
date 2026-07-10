@@ -19,10 +19,15 @@ prebuilt is committed. The extracted macOS binaries live under `app/native/nativ
 | [`zfile`](zfile/) | Disk/volume info (free space, mount points) | N-API (node-addon-api) | glibc (`statvfs`, `getmntent_r`) | n/a | `patch-zfile.js` |
 | [`v8-profiles`](v8-profiles/) | V8 CPU profiler | raw V8 `CpuProfiler` (NAN) | none (V8/Electron) | shape byte-for-byte | `patch-v8-profiles.js` |
 | `sqlite3` | SQLCipher-encrypted message DB | node-sqlite3 + system SQLCipher | system `libsqlcipher` | n/a | `patch-sqlite3.js` |
+| [`zimage`](zimage/) | Image thumbnails (webp/jpeg) | N-API, libvips/mozjpeg | libvips 8.14.2, mozjpeg 4.1.1 (bundled, RPATH=$ORIGIN) | **yes** (image bytes) | `patch-zimage.js` |
+| [`file-utilities`](file-utilities/) | Directory size, hardlinks, fs-type | Rust (napi-rs) | none (walkdir/globset/libc) | **yes** (output) | `patch-file-utilities.js` |
+| [`file-utils`](file-utils/) | Disk usage (`getDiskUsage` via `statvfs`) | N-API (node-addon-api) | glibc (`statvfs`) | **yes** (output) | `patch-file-utils.js` |
 
-Modules still stubbed / not yet RE'd (guarded so the app runs): `zimage` (libvips
-thumbnails), `mp4thumb` (video thumbnails), `zwalker` (cache GC), `file-utils` /
-`file-utilities` (disk stats), `zcall` (voice/video). See `docs/RE-ROADMAP.md`.
+Modules still stubbed / not yet RE'd (guarded so the app runs): `mp4thumb` (video
+thumbnails), `zwalker` (cache GC), `zcall` (voice/video). See `docs/RE-ROADMAP.md`.
+
+> `file-utils` (this C++ `getDiskUsage` addon) and `file-utilities` (the Rust napi-rs
+> directory-sizing crate) are **different modules** with confusingly similar names.
 
 ## How the build works
 
