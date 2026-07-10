@@ -57,8 +57,7 @@
         "xdg-utils",
         "libatspi2.0-0",
         "libuuid1",
-        "libsecret-1-0",
-        "libsqlcipher0 | libsqlcipher1 | libsqlcipher2"
+        "libsecret-1-0"
       ]
     }
   }

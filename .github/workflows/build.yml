@@ -16,7 +16,11 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # Build on the OLDEST supported base so the native libs' glibc / libstdc++ /
+    # OpenSSL requirements stay low → the .deb runs on the widest range of distros.
+    # 22.04 = glibc 2.35 + OpenSSL 3 (libcrypto.so.3). Don't drop to 20.04: it ships
+    # OpenSSL 1.1 (no libcrypto.so.3) and its runner is being retired.
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
 
@@ -31,10 +35,27 @@ jobs:
             p7zip-full build-essential libssl-dev liblzma-dev libsqlcipher-dev \
             dpkg fakeroot cmake nasm ninja-build patchelf git curl \
             python3 python3-pil \
-            meson pkg-config autoconf automake libtool gettext libglib2.0-dev-bin
+            meson pkg-config autoconf automake libtool gettext autopoint libglib2.0-dev-bin
+
+      - name: Install modern 7-Zip (7zz)
+        # Ubuntu 22.04's legacy p7zip 16.02 (`7z`) AND whatever old `7zz` the runner
+        # ships both fail to read Zalo's DMG ("Headers Error"). Drop in the official
+        # 7-Zip 23.01 static build (verified to extract this DMG) at /usr/local/bin so
+        # it wins on PATH; extract-installer.js prefers `7zz`.
+        run: |
+          curl -fL https://www.7-zip.org/a/7z2301-linux-x64.tar.xz -o /tmp/7z.tar.xz
+          tar -C /tmp -xJf /tmp/7z.tar.xz 7zz
+          sudo install -m 755 /tmp/7zz /usr/local/bin/7zz
+          command -v 7zz && 7zz i | head -2
 
       - name: Install npm deps
         run: npm install --no-audit --no-fund
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          target: x86_64-unknown-linux-gnu
 
       - name: Setup + Build
         id: build

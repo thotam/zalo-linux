@@ -62,7 +62,9 @@ async function main() {
       await require('./patches/patch-v8-profiles.js').main();
       await require('./patches/patch-zjxl.js').main();
       await require('./patches/patch-zimage.js').main();
+      await require('./patches/patch-file-utilities.js').main();
       await require('./patches/patch-native-image-flags.js').main();
+      await require('./patches/patch-clipboard-image-paste.js').main();
       await require('./patches/patch-native-lib-logging.js').main();
       logger.success('All patches applied');
     }
