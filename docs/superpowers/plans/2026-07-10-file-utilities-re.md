@@ -1643,7 +1643,8 @@ Content must document: recovered crate deps + versions (incl. that the mac binar
 - the mac binary cross-check (run `file-utilities.node` on a Mac, diff fields) is deferred because Mach-O cannot run on Linux;
 - **async engine:** the mac binary uses a **tokio 1.36.0** multi-thread runtime for async; this port uses napi `AsyncTask` (libuv threadpool). Byte-identical output either way (results don't depend on the async engine) — equivalent, simpler, not a fidelity gap;
 - **export surface:** the port exports exactly the 11 functions the mac binding exposes, with no `Task` struct classes leaked (achieved by not annotating `impl Task`).
-List the three TDD-locked inferences (fileCount dedup, HardlinkResult shape, DirectoryTreeResult fields) explicitly as "verify on Mac if available."
+- **glob `*` semantics:** `getDirectorySizeByGlob` compiles the pattern with `globset::Glob::new(pat).compile_matcher()`, whose default (`literal_separator = false`) makes a single `*` match across `/` — i.e. `*.bin` matches nested files, not just top-level. This mirrors the mac binary's own globset usage (same crate), so it is the least-speculative faithful choice, but the exact `literal_separator` setting the original used is not recoverable from strings — flag it as a "verify on Mac if available" item.
+List the TDD-locked inferences (fileCount dedup, HardlinkResult shape, DirectoryTreeResult fields, glob `*` recursion) explicitly as "verify on Mac if available."
 
 - [ ] **Step 2: Write `README.md`**
 
