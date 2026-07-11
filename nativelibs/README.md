@@ -22,9 +22,10 @@ prebuilt is committed. The extracted macOS binaries live under `app/native/nativ
 | [`zimage`](zimage/) | Image thumbnails (webp/jpeg) | N-API, libvips/mozjpeg | libvips 8.14.2, mozjpeg 4.1.1 (bundled, RPATH=$ORIGIN) | **yes** (image bytes) | `patch-zimage.js` |
 | [`file-utilities`](file-utilities/) | Directory size, hardlinks, fs-type | Rust (napi-rs) | none (walkdir/globset/libc) | **yes** (output) | `patch-file-utilities.js` |
 | [`file-utils`](file-utils/) | Disk usage (`getDiskUsage` via `statvfs`) | N-API (node-addon-api) | glibc (`statvfs`) | **yes** (output) | `patch-file-utils.js` |
+| [`mp4thumb`](mp4thumb/) | Video → JPEG thumbnail | N-API + pinned FFmpeg 5.1 | libav*/libsw* 5.1 (from source, bundled .so, RPATH=$ORIGIN) | **by construction** (JPEG bytes) | `patch-mp4thumb.js` |
 
-Modules still stubbed / not yet RE'd (guarded so the app runs): `mp4thumb` (video
-thumbnails), `zwalker` (cache GC), `zcall` (voice/video). See `docs/RE-ROADMAP.md`.
+Modules still stubbed / not yet RE'd (guarded so the app runs): `zwalker` (cache GC),
+`zcall` (voice/video). See `docs/RE-ROADMAP.md`.
 
 > `file-utils` (this C++ `getDiskUsage` addon) and `file-utilities` (the Rust napi-rs
 > directory-sizing crate) are **different modules** with confusingly similar names.

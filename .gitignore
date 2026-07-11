@@ -24,6 +24,10 @@ nativelibs/zjxl/deps-src/
 nativelibs/zimage/.deps-prefix/
 nativelibs/zimage/deps-src/
 
+# mp4thumb FFmpeg deps (built from pinned source into a content-addressed cache)
+nativelibs/mp4thumb/.deps-prefix/
+nativelibs/mp4thumb/deps-src/
+
 # Scratch / installer / logs
 temp/
 *.dmg

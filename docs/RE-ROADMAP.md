@@ -20,7 +20,7 @@ Trạng thái hiện tại của `app/native/nativelibs/*`. **7 module đã port
 | **zjxl** | Codec **JPEG-XL** | libjxl 0.9.3+OpenCV 4.12+turbojpeg 3.1.1 | ✅ **DONE (native, byte-identical)** | `getJxlInfo, decodeToJpeg(jxlToJpeg), bitmapToJxl, resizeJxl(+Limit), jxlDecompressMulti` | — (flag-gated) |
 | **zimage** | Thumbnail/resize | **libvips** 8.14.2 (mozjpeg 4.1.1) | ✅ **DONE (native, byte-identical)** | `thumbnail, resizeQA` | — (flag-gated) |
 | **v8-profiles** | CPU profiler | v8-profiler (NAN, raw-V8) | ✅ DONE (build) | — | — |
-| **mp4thumb** | Thumbnail video | FFmpeg | ⚠️ stub (throw khi gọi) | `generateThumbnail(Async), cancel` | **P2** |
+| **mp4thumb** | Thumbnail video | C++ node-addon-api + pinned FFmpeg 5.1 | ✅ **DONE (native, byte-identical by construction, linux/x64)** | `MP4Thumb.{generateThumbnail, generateThumbnailAsync, setOutputPath, cancel}` | — |
 | **zwalker** | Quét/GC cache media | Rust (NAPI-RS) | ⚠️ stub no-op (guard) | `scanDirectory, deleteHomelessFiles, deleteEmptyFolders, statUnmarkedFiles, updateReferenceMessageId` | **P2** |
 | **file-utilities** | Dung lượng thư mục, hardlink, fs-type | Rust (NAPI-RS) | ✅ **DONE (native, byte-identical output, linux_x64)** | `getDirectorySize(Sync/Async), getDirectorySizeTree(Sync/Async), getDirectorySizeByGlob(Sync/Async), detectHardlinks(Sync/Async), detectFilesystem(Sync/Async), cancelJob` | — |
 | **file-utils** | Disk usage (statvfs) | C++ (node-addon-api) | ✅ **DONE (native, byte-identical output, linux/x64)** | `getDiskUsage` | — |
@@ -55,10 +55,11 @@ Chọn hướng **RE native + libvips từ source** (giống zjxl), không dùng
 
 ## Phase 2 — Media & housekeeping (P2)
 
-### `mp4thumb` — thumbnail video
-- **API:** `generateThumbnail(path, opts) → buf`, `generateThumbnailAsync`, `cancel`.
-- **Map sang OSS:** `ffmpeg -ss <t> -i <video> -vframes 1 -f image2 <out.jpg>` (spawn) hoặc `fluent-ffmpeg`. `cancel` = kill child process.
-- Effort: Low–Med. Dep runtime: `ffmpeg` (thêm vào `.deb` Depends). Verify: sinh thumbnail từ 1 mp4 test.
+### ✅ `mp4thumb` — thumbnail video — **DONE (native C++, byte-identical by construction)**
+- **API (native):** class `MP4Thumb` với `generateThumbnail`(sync)/`generateThumbnailAsync`(Promise/AsyncWorker) + `setOutputPath` (ẩn) + `cancel` (atomic flag). Wrapper JS: `{generateThumbnail(in,out,w,h,mediaId), cancel(mediaId)}`.
+- **RE bằng disassembly** (Capstone + Mach-O): pipeline `find_best_stream → decode first frame (no seek) → fit-inside-even resize → sws_scale(SWS_BICUBIC→YUV420P) → MJPEG encode (color_range=JPEG, q=3) → mjpeg muxer`. Hằng số + offset xem `nativelibs/mp4thumb/RE-PARAMS.md`.
+- **Rebuild** C++ node-addon-api + **pin FFmpeg 5.1 (Lavc 59.37.100) build từ nguồn**, shared + bundle `.so` closure (RPATH=$ORIGIN, như zimage). Deploy `patch-mp4thumb.js`. Branch `re/mp4thumb`.
+- **Caveat:** không có Mac oracle → byte-identity theo cấu trúc (pin đúng version + replicate chính xác), verify = JPEG hợp lệ + đúng dimensions + deterministic (2 lần chạy byte-identical).
 
 ### `zwalker` — quét & GC cache media (Rust NAPI-RS)
 - **API:** `scanDirectory(dir)`, `deleteHomelessFiles`, `deleteEmptyFolders`, `statUnmarkedFiles`, `updateReferenceMessageId`. Hiện stub no-op → cache **không được dọn** (phình dần) nhưng app chạy bình thường.
@@ -136,7 +137,7 @@ dựng lại crate Rust `napi-rs` từ string recovery trên binary macOS (branc
 ## Thứ tự đề xuất
 
 1. ~~**P1 — zjxl**~~ ✅ **DONE**. ~~**zimage**~~ ✅ **DONE** (native, byte-identical, branch `re/zimage`). Cả hai flag-gated (dormant mặc định).
-2. ~~**P2 — file-utilities**~~ ✅ **DONE** (native Rust `napi-rs`, byte-identical output, branch `re/file-utilities`) · ~~**file-utils**~~ ✅ **DONE** (native C++ node-addon-api, byte-identical output, branch `re/file-utils`). Còn lại **mp4thumb** (video thumb, ffmpeg) → **zwalker** (GC, làm khi cache phình).
+2. ~~**P2 — file-utilities**~~ ✅ **DONE** (native Rust `napi-rs`, byte-identical output, branch `re/file-utilities`) · ~~**file-utils**~~ ✅ **DONE** (native C++ node-addon-api, byte-identical output, branch `re/file-utils`). · ~~**mp4thumb**~~ ✅ **DONE** (native C++ + pinned FFmpeg 5.1, byte-identical by construction, branch `re/mp4thumb`). Còn lại **zwalker** (GC, làm khi cache phình).
 3. **P4 — zcall**: đánh giá khả thi riêng; mặc định để stub.
 4. **v8-profiles**: đã build; xác minh logging/trigger (đang làm).
 
