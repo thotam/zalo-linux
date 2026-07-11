@@ -115,11 +115,17 @@ pub fn delete_homeless_files(
     _root: String,
     ignore_folder_paths: Vec<String>,
     tracking_folder_paths: Vec<String>,
-    delete: Option<bool>,
+    delete_stat_cache: Option<bool>,
 ) -> DeleteResult {
-    // mac renderer default is `true` (delete for real).
-    let do_delete = delete.unwrap_or(true);
-    let o = delete_homeless_impl(&ignore_folder_paths, &tracking_folder_paths, do_delete);
+    // The 4th arg is `deleteStatCache` (del_stat_cache), NOT a "should delete" switch:
+    // this function is only invoked from the delete phase (gated by enable_del upstream),
+    // so it always deletes the homeless files. The flag only concerns the stat cache,
+    // which our in-RAM model does not persist -> no-op here.
+    let o = delete_homeless_impl(
+        &ignore_folder_paths,
+        &tracking_folder_paths,
+        delete_stat_cache.unwrap_or(true),
+    );
     DeleteResult {
         file_number: o.file_number,
         size: o.size as i64,

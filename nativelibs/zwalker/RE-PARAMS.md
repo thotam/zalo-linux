@@ -78,14 +78,20 @@ Sizes are `i64` (JS reads them through `Number(...)`); counts are `u32`.
   buckets. `trackingATime` = `{ [glob]: FolderBasicInfo[] }`. (Reporting only; never drives
   deletion. Exact JSON shape is low-risk — the feature is server-gated OFF.)
 - **homeless filter:** `reference_message_id.is_empty()` AND not matched by any `ignore` glob.
-- **`delete` (4th arg of `deleteHomelessFiles`):** boolean, mac renderer default `true`.
-  `true` ⇒ `remove_file` for real + drop from the global tree; `false` ⇒ report-only
-  (nothing touched, candidates returned under the deleted totals, zero failures). We match
-  the mac default by treating a missing arg as `true`. Polarity could not be confirmed by
-  disassembly (no Mach-O disassembler available in this environment: GNU objdump 2.46 does
-  not recognise the format, and capstone/llvm are absent); `true = delete` is the natural
-  reading of the `!0` default and of the user's directive "delete for real, like mac". The
-  feature staying gated OFF means this is never exercised unexpectedly.
+- **4th arg of `deleteHomelessFiles` = `deleteStatCache`, NOT a delete switch.** Traced
+  precisely from the orchestrator: `executeDeletionPhase(e,t)` calls
+  `this.deleteResources.bind(this, !!s.deleteStatCache)`, and `deleteResources(e)` forwards
+  `e` as the 4th native arg — so it is `config.deleteStatCache` (`del_stat_cache`, default
+  `1`). The decision to delete lives ONE level up: `run()` does
+  `stage<=DELETE_RESOURCES && r.enableDelete ? executeDeletionPhase : calculateStatsAfterScanning`,
+  so `deleteHomelessFiles` is only ever called when the app already wants to delete (gated
+  by `enable_del`), and the read-only path is the separate `statUnmarkedFiles`. Therefore
+  **`deleteHomelessFiles` ALWAYS deletes the homeless files when called**; the 4th boolean
+  only concerns clearing the persisted *stat cache* (a no-op in our RAM-only model). An
+  earlier reconstruction misread this arg as "should delete" and gated the unlink on it —
+  which only worked because `del_stat_cache` defaults to 1; it would have silently skipped
+  the whole cleanup under a server config of `enable_del:1 + del_stat_cache:0`. Fixed:
+  deletion no longer depends on the flag.
 
 ## Divergences from mac (documented for honesty)
 

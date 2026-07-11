@@ -23,8 +23,10 @@ statUnmarkedFiles(root, ignoreFolderPaths: string[], trackingFolderPaths: string
                   ageThresholds: number[])
   : { fileNumber, size, trackingPath: string, trackingATime: string /*JSON*/ }
 
-// Delete homeless files from disk (4th arg = delete, mac default true).
-deleteHomelessFiles(root, ignoreFolderPaths, trackingFolderPaths, delete?: boolean)
+// Delete homeless files from disk. Only ever called from the RRC delete phase (gated
+// upstream by enable_del), so it ALWAYS deletes when invoked; the 4th arg is
+// deleteStatCache (del_stat_cache), a separate stat-cache toggle, not a delete switch.
+deleteHomelessFiles(root, ignoreFolderPaths, trackingFolderPaths, deleteStatCache?: boolean)
   : { fileNumber, size, failedFileNumber, failedSize, trackingPath: string }
 
 // Remove empty directories under `root`, deepest-first. `root` itself is never removed.
