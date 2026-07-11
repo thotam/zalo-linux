@@ -1,0 +1,9 @@
+{
+  "name": "mp4thumb-linux",
+  "version": "1.0.0",
+  "description": "Linux reimplementation of Zalo mp4thumb native addon (video->JPEG thumbnail via pinned static FFmpeg 5.1)",
+  "main": "index.js",
+  "private": true,
+  "scripts": { "build": "node-gyp configure build" },
+  "dependencies": { "node-addon-api": "^5.0.0" }
+}
