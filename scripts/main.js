@@ -25,7 +25,7 @@ async function main() {
       //      sqlite3       : build SQLCipher .node -> napi-v6-linux-x64 slot
       //      db-cross-v4   : build .node + splice linux branch into dist/binding.js
       //      zfile         : build .node + splice linux branch into index.js (parity)
-      //      linux-guards  : short-circuit codesign() + guard zwalker/mp4thumb loaders
+      //      linux-guards  : short-circuit codesign() (zwalker/mp4thumb now own their load)
       //      v8-profiles   : build native CPU profiler .node + splice linux require
       //                      (real native; no fallback stub, by request)
       //      zjxl          : build native JPEG-XL addon (pinned libjxl 0.9.3 +
@@ -65,6 +65,7 @@ async function main() {
       await require('./patches/patch-file-utilities.js').main();
       await require('./patches/patch-file-utils.js').main();
       await require('./patches/patch-mp4thumb.js').main();
+      await require('./patches/patch-zwalker.js').main();
       await require('./patches/patch-native-image-flags.js').main();
       await require('./patches/patch-video-thumb-flag.js').main();
       await require('./patches/patch-clipboard-image-paste.js').main();
