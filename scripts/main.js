@@ -70,6 +70,7 @@ async function main() {
       await require('./patches/patch-video-thumb-flag.js').main();
       await require('./patches/patch-clipboard-image-paste.js').main();
       await require('./patches/patch-native-lib-logging.js').main();
+      await require('./patches/patch-zwalker-probe.js').main();
       logger.success('All patches applied');
     }
 
