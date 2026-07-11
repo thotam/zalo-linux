@@ -28,9 +28,11 @@ const BUILD_DEPS = path.join(LIB_DIR, 'scripts', 'build-deps.sh');
 const DEST_DIR = path.join(APP_DIR, 'native', 'nativelibs', 'mp4thumb', 'linux');
 const INDEX_JS = path.join(APP_DIR, 'native', 'nativelibs', 'mp4thumb', 'index.js');
 
-// The mac index.js hard-throws on linux; make linux an exclusive branch loading our .node.
-const ANCHOR = `if (process.platform === 'linux') throw new Error("mp4thumb: no Linux prebuilt (video thumbnails out of v1 scope)");\n        if(process.platform === 'win32') {`;
-const REPLACEMENT = `if (process.platform === 'linux') {\n            thumbModule = require('./linux/mp4thumb.node');\n        } else if(process.platform === 'win32') {`;
+// The mac index.js falls through to a darwin require on linux (then a throwing stub).
+// Anchor directly on the pristine getLib() try-block and inject an exclusive linux
+// branch loading our .node — self-contained, no dependency on patch-linux-guards.
+const ANCHOR = `    try {\n        if(process.platform === 'win32') {`;
+const REPLACEMENT = `    try {\n        if (process.platform === 'linux') {\n            thumbModule = require('./linux/mp4thumb.node');\n        } else if(process.platform === 'win32') {`;
 
 function spliceLinuxBranch(indexPath) {
   let c = fs.readFileSync(indexPath, 'utf8');

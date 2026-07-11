@@ -21,7 +21,7 @@ Trạng thái hiện tại của `app/native/nativelibs/*`. **7 module đã port
 | **zimage** | Thumbnail/resize | **libvips** 8.14.2 (mozjpeg 4.1.1) | ✅ **DONE (native, byte-identical)** | `thumbnail, resizeQA` | — (flag-gated) |
 | **v8-profiles** | CPU profiler | v8-profiler (NAN, raw-V8) | ✅ DONE (build) | — | — |
 | **mp4thumb** | Thumbnail video | C++ node-addon-api + pinned FFmpeg 5.1 | ✅ **DONE (native, byte-identical by construction, linux/x64)** | `MP4Thumb.{generateThumbnail, generateThumbnailAsync, setOutputPath, cancel}` | — |
-| **zwalker** | Quét/GC cache media | Rust (NAPI-RS) | ⚠️ stub no-op (guard) | `scanDirectory, deleteHomelessFiles, deleteEmptyFolders, statUnmarkedFiles, updateReferenceMessageId` | **P2** |
+| **zwalker** | Quét/GC cache media | Rust (NAPI-RS) | ✅ **DONE (native Rust, reconstruction, linux/x64)** | `scanDirectory, deleteHomelessFiles, deleteEmptyFolders, statUnmarkedFiles, updateReferenceMessageId` | — |
 | **file-utilities** | Dung lượng thư mục, hardlink, fs-type | Rust (NAPI-RS) | ✅ **DONE (native, byte-identical output, linux_x64)** | `getDirectorySize(Sync/Async), getDirectorySizeTree(Sync/Async), getDirectorySizeByGlob(Sync/Async), detectHardlinks(Sync/Async), detectFilesystem(Sync/Async), cancelJob` | — |
 | **file-utils** | Disk usage (statvfs) | C++ (node-addon-api) | ✅ **DONE (native, byte-identical output, linux/x64)** | `getDiskUsage` | — |
 | **zcall** | Engine gọi thoại/video | WebRTC (Opus/AAC/H264) proprietary | ⚠️ `{error:'not support'}` | `bindCanvas, render, startRender, getActiveAudioCodecs, holdAudio, …` (~30) | **P4 (out-of-scope)** |
@@ -61,11 +61,32 @@ Chọn hướng **RE native + libvips từ source** (giống zjxl), không dùng
 - **Rebuild** C++ node-addon-api + **pin FFmpeg 5.1 (Lavc 59.37.100) build từ nguồn**, shared + bundle `.so` closure (RPATH=$ORIGIN, như zimage). Deploy `patch-mp4thumb.js`. Branch `re/mp4thumb`.
 - **Caveat:** không có Mac oracle → byte-identity theo cấu trúc (pin đúng version + replicate chính xác), verify = JPEG hợp lệ + đúng dimensions + deterministic (2 lần chạy byte-identical).
 
-### `zwalker` — quét & GC cache media (Rust NAPI-RS)
-- **API:** `scanDirectory(dir)`, `deleteHomelessFiles`, `deleteEmptyFolders`, `statUnmarkedFiles`, `updateReferenceMessageId`. Hiện stub no-op → cache **không được dọn** (phình dần) nhưng app chạy bình thường.
-- **RE approach:** reimplement JS bằng `fs` walk. **Cần hiểu semantics** trước: "homeless files" = file cache không còn message nào tham chiếu; `updateReferenceMessageId` = cập nhật bảng tham chiếu. Đọc cách main-dist gọi (~10 refs) để suy ra hợp đồng, rồi implement `fs.readdir` + đối chiếu với bảng reference trong DB.
-- Effort: Med (logic tham chiếu) / Low (nếu chỉ làm scanDirectory + deleteEmptyFolders). Rủi ro: xoá nhầm → phải cẩn trọng, test kỹ trên thư mục giả.
-- **Có thể giữ stub cho tới khi cache thực sự phình** (không chặn tính năng nào).
+### ✅ `zwalker` — quét & GC cache media (Rust NAPI-RS) — **DONE (native Rust, reconstruction, linux/x64)**
+- **RE native đầy đủ** (không reimplement JS thuần): dựng lại crate Rust `napi-rs`
+  (`nativelibs/zwalker/`) từ crate-layout + struct fields + dep-set lộ trên binary mac,
+  và hợp đồng suy ra từ facade `$zFeatures.zwalker` + orchestrator `ResourceCleanupManager`.
+  Chi tiết: `nativelibs/zwalker/RE-PARAMS.md`,
+  `docs/superpowers/specs/2026-07-11-zwalker-re-design.md`.
+- **Kiến trúc:** một **cây file toàn cục trong RAM** (behind `parking_lot::Mutex`, sống
+  suốt vòng đời process `shared-worker`, không persist đĩa) — khớp panic-string mac
+  ("Mutex is poisoned … from tree", "Error locking tree"). `scanDirectory` dựng cây;
+  `updateReferenceMessageId` đánh dấu `reference_message_id` từng file; `statUnmarkedFiles`/
+  `deleteHomelessFiles` đọc lại. "Homeless" = file không có message tham chiếu (ref id rỗng).
+- **Đủ 5 export:** `scanDirectory, updateReferenceMessageId, statUnmarkedFiles,
+  deleteHomelessFiles, deleteEmptyFolders`. Structs mac (`FileInfo` 5 fields, `NodeData`
+  8 fields, `FolderBasicInfo` 2 fields) tái dựng chuẩn; return objects camelCase khớp
+  facade (`fileNumber/size/trackingPath/trackingATime/failedFileNumber/failedSize/…`).
+- **Deps pin đúng version binary:** `napi 2.16` (napi8), `ignore 0.4.25` (walk song song),
+  `globset 0.4.18`, `rayon 1.11`, `serde_json 1.0.149`, `once_cell 1.21.3`,
+  `parking_lot 0.12.5`, `same-file 1.0.6`. `Cargo.lock` gitignore.
+- **Xoá THẬT** như mac (không dry-run): `deleteHomelessFiles(...,true)` unlink file homeless
+  (trừ ignore-glob), `deleteEmptyFolders` xoá thư mục rỗng bottom-up. Test full-lifecycle
+  trên fixture (`nativelibs/zwalker/__tests__/zwalker.test.js`): scan→mark→stat→delete
+  chứng minh homeless bị xoá, file đã mark sống sót, ignore-glob bảo vệ.
+- **Feature-flag `cleanup.enable` GIỮ default OFF** (VNG rollout) — addon sẵn sàng nhưng
+  app **không tự chạy GC** cho tới khi VNG bật (an toàn, không tự xoá cache của user).
+- Deploy `patch-zwalker.js` (drop `.node` vào slot `zwalker.linux-x64-gnu.node` của napi
+  loader — không cần splice). Đã **tách khỏi `patch-linux-guards`** (addon tự sở hữu load).
 
 ---
 
