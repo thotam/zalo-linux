@@ -66,6 +66,7 @@ async function main() {
       await require('./patches/patch-file-utils.js').main();
       await require('./patches/patch-mp4thumb.js').main();
       await require('./patches/patch-native-image-flags.js').main();
+      await require('./patches/patch-video-thumb-flag.js').main();
       await require('./patches/patch-clipboard-image-paste.js').main();
       logger.success('All patches applied');
     }
