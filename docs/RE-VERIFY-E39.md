@@ -40,9 +40,10 @@ cat ~/zalo-native-libs.log
 | **zfile** | ⬜ chưa kích hoạt | Không log — phiên không gửi/nhận file |
 | **file-utils** | ✅ chạy thật (RE C++ node-addon-api) | Màn Storage gọi thật: `LOAD fileUtils → {getDiskUsage:fn}` (hết `{error:"not support"}`), rồi `getDiskUsage("/")` ×4 → `RET {available,free,total:489997189120}` trong 0–1ms. **`total` khớp byte-identical** oracle `statvfs` của `/`. |
 | **file-utilities** | ✅ chạy thật (RE Rust napi-rs) | Màn **Quản lý dữ liệu/Storage** gọi thật: `getDirectorySizeByGlobAsync` ×4 (97MB/18, 9.2MB/14, 86MB/396 file…), `getDirectorySizeAsync` ×4 (556MB/591, 222MB/729 file…), và **đường tree** `getDirectorySizeAsync(_,{deep:{maxDepth:3}})` → `{depth:0,size:57456,fileCount:3,…}`. Mọi call **RESOLVE** (0 REJECT), 1–4ms. `includeRoot` không hề được set (khớp residual). |
-| **zcall / zwalker / mp4thumb** | ⬜ chưa kích hoạt | Không gọi call/video/quét cache trong phiên |
+| **mp4thumb** | ✅ chạy thật (RE C++ + FFmpeg 5.1 static) | Màn **zCloud** gọi thật `generateThumbnail(localVideo, out, 300, 300)` ×N → **`RESOLVE true`** 12–103ms/video. Gỡ bằng 2 fix: (1) ép feature-flag `gen_video_thumb.enable` (default OFF), (2) static-link ffmpeg + `--exclude-libs,ALL` để symbol không đụng `libffmpeg.so` của Electron (nếu shared → interpose sang ffmpeg Chromium, "Protocol not found"). |
+| **zcall / zwalker** | ⬜ chưa kích hoạt | Không gọi call/quét cache trong phiên |
 
-**Kết luận:** **zjxl, zimage, sqlite3, file-utilities, file-utils — đã xác nhận chạy thật** trên E39 (file-utilities + file-utils verify 2026-07-10 qua màn Storage: glob + size + tree + `getDiskUsage`, mọi call thành công, `file-utils.total` khớp byte-identical oracle). Xem thêm bảng tổng quan RE ở [RE-ROADMAP.md](RE-ROADMAP.md).
+**Kết luận:** **zjxl, zimage, sqlite3, file-utilities, file-utils, mp4thumb — đã xác nhận chạy thật** trên E39 (mp4thumb verify 2026-07-11 qua màn zCloud: `generateThumbnail` local video → `RESOLVE true`). Xem thêm bảng tổng quan RE ở [RE-ROADMAP.md](RE-ROADMAP.md).
 
 ## Ghi chú
 
@@ -56,7 +57,6 @@ cat ~/zalo-native-libs.log
 |---|---|
 | `zfile` (`stat/copyFolder/getChecksum`) | Gửi hoặc nhận 1 **file** (không phải ảnh) |
 | `db-cross-v4` (`decompressAndDecryptDb`) | Mở hội thoại có backup **E2EE** mã hoá |
-| `mp4thumb` | Nhận/xem 1 **video** (khi RE xong — hiện stub) |
 | `zwalker` | Trigger dọn/GC cache media (khi RE xong) |
 | `zcall` | Gọi thoại/video (out-of-scope, hiện stub) |
 
