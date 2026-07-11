@@ -66,9 +66,10 @@ function run() {
   assert.strictEqual(statIgnored.fileNumber, 1, 'ignore glob excludes zcloud homeless');
   assert.strictEqual(Number(statIgnored.size), 50, 'only loose.dat remains unmarked');
 
-  // 4. deleteHomelessFiles (REAL delete): removes the 2 homeless, keeps the 2 marked.
-  const del = z.deleteHomelessFiles(root, ignoreGlobs, trackingGlobs, true);
-  assert.strictEqual(del.fileNumber, 2, 'deleted 2 homeless');
+  // 4. deleteHomelessFiles ALWAYS deletes homeless when called (the 4th arg is
+  //    deleteStatCache, not a delete switch) — pass false to prove it still deletes.
+  const del = z.deleteHomelessFiles(root, ignoreGlobs, trackingGlobs, false);
+  assert.strictEqual(del.fileNumber, 2, 'deleted 2 homeless even with deleteStatCache=false');
   assert.strictEqual(Number(del.size), 450, 'deleted size');
   assert.strictEqual(del.failedFileNumber, 0, 'no failures');
   assert.strictEqual(fs.existsSync(path.join(root, 'zcloud', 'c.mp4')), false, 'homeless mp4 gone');

@@ -1,11 +1,17 @@
-//! `deleteHomelessFiles(rootPath, ignoreFolderPaths, trackingFolderPaths, delete)` —
-//! actually remove the homeless (unmarked) files from disk, skipping anything under an
-//! ignore pattern. Successfully removed files are dropped from the global tree so a
-//! following stat/delete pass sees a consistent world.
+//! `deleteHomelessFiles(rootPath, ignoreFolderPaths, trackingFolderPaths, deleteStatCache)`
+//! — remove the homeless (unmarked) files from disk, skipping anything under an ignore
+//! pattern. Successfully removed files are dropped from the global tree so a following
+//! stat/delete pass sees a consistent world.
 //!
-//! The 4th boolean is the mac `delete` switch (renderer default `true`): `true` unlinks
-//! for real, `false` is a report-only pass (nothing is touched, everything that *would*
-//! be removed is returned under the deleted totals with zero failures). See RE-PARAMS.md.
+//! This function is only ever invoked from the RRC *delete* phase (`executeDeletionPhase`),
+//! which the orchestrator runs only when `config.enableDelete` (`enable_del`) is true —
+//! the read-only alternative is `statUnmarkedFiles`. So deleting the homeless files is the
+//! function's whole purpose: it ALWAYS deletes when called. The 4th boolean is NOT a
+//! "should I delete" switch — it is `deleteStatCache` (`del_stat_cache`, default 1), a
+//! separate toggle for whether the persisted stat cache is also cleared. Our model keeps
+//! no on-disk stat cache (the tree is process-global RAM, replaced each scan), so it is a
+//! no-op here — but it must NOT gate the homeless deletion (that was an earlier RE
+//! misread). See RE-PARAMS.md.
 
 use crate::crawler::scan_directory::aggregate_tracking;
 use crate::model::{FileInfo, FolderBasicInfo, STATE};
@@ -23,7 +29,7 @@ pub struct DeleteOutcome {
 pub fn delete_homeless_files(
     ignore_globs: &[String],
     tracking_globs: &[String],
-    delete: bool,
+    _delete_stat_cache: bool,
 ) -> DeleteOutcome {
     let mut state = STATE.lock();
     let ignore = build_globset(ignore_globs);
@@ -41,7 +47,7 @@ pub fn delete_homeless_files(
     let mut failed_size = 0u64;
 
     for f in candidates {
-        if delete {
+        {
             match std::fs::remove_file(&f.file_path) {
                 Ok(()) => {
                     removed_paths.insert(f.file_path.clone());
@@ -52,9 +58,6 @@ pub fn delete_homeless_files(
                     failed_size += f.size;
                 }
             }
-        } else {
-            // Report-only: count as deletable, touch nothing.
-            deleted.push(f);
         }
     }
 
