@@ -38,6 +38,17 @@ if (!process.env.CALL_DIAG_TEST) {
     const { app, session } = require('electron');
     log('DIAG-INIT', { log: LOG, electron: (process.versions && process.versions.electron) || null });
 
+    // Opt-in remote debugging (SP2 signaling prototype). Enabled from INSIDE the main process
+    // (before app-ready) because the Electron CLI-args fuse rejects --remote-debugging-port.
+    // Gate on ZALO_REMOTE_DEBUG so normal launches are unaffected. Diagnostics-only.
+    if (process.env.ZALO_REMOTE_DEBUG) {
+      try {
+        app.commandLine.appendSwitch('remote-debugging-port', process.env.ZALO_REMOTE_DEBUG === '1' ? '9222' : String(process.env.ZALO_REMOTE_DEBUG));
+        app.commandLine.appendSwitch('remote-allow-origins', '*');
+        log('REMOTE-DEBUG-ENABLED', { port: process.env.ZALO_REMOTE_DEBUG === '1' ? '9222' : process.env.ZALO_REMOTE_DEBUG });
+      } catch (err) { log('REMOTE-DEBUG-ERROR', String((err && err.message) || err)); }
+    }
+
     const url = (c) => { try { return c.getURL(); } catch (_) { return '?'; } };
 
     // Webview + renderer lifecycle: attach, load result, console (in-page getUserMedia errors), crashes.

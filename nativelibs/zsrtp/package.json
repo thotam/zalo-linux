@@ -1,0 +1,11 @@
+{
+  "name": "zsrtp",
+  "version": "1.0.0",
+  "private": true,
+  "gypfile": true,
+  "dependencies": { "node-addon-api": "^8.0.0" },
+  "scripts": {
+    "build:deps": "bash scripts/build-deps.sh",
+    "build": "node-gyp rebuild"
+  }
+}

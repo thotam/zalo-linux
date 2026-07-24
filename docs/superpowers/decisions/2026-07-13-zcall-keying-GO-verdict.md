@@ -191,6 +191,23 @@ same protocol. Concrete path:
 
 ---
 
+## 6b. SP2 step 1 — DONE (Linux, live) 2026-07-13
+
+Roadmap §6.1 (signaling + keying) is **implemented and validated live on Linux**
+(`tools/zcall-signaling/`, spec `../specs/2026-07-13-zcall-sp2-signaling-keying-prototype-design.md`).
+`node tools/zcall-signaling/prototype.js` obtains a real config and derives the SRTP master key:
+`sessIdLen 154`, `keyLen 30`, servers on `:4200`, `changeZRTP.enable 0`.
+
+Key implementation note vs the original plan: on Linux the JS `requestCall` is **native-gated**
+(only fired by the native-engine signal 401, via `handleSendSignal`/`$zcall.onCallSignal`,
+which the stubbed engine never sends) — so it cannot be captured by clicking call, and a
+from-scratch rebuild would have to reproduce the per-request common-params signing. The working
+approach **invokes the app's own `requestCall` via CDP**: webpack-4 `webpackJsonp` require grab
+→ find the module exporting `requestCall` → `requestCall(calleeId, callId, "[]", 1)`, reusing
+the app's auth/zpw/signing; the return value is the already-decoded config. Remote debugging is
+enabled from inside the main process (`ZALO_REMOTE_DEBUG=1`, CLI `--remote-debugging-port` is
+fuse-rejected). Next: SP2 step 2 (media — libsrtp + RTP/UDP `:4200` + InitZRTP).
+
 ## 7. Bottom line
 
 **Zalo's call SRTP key = the first 30 chars of the server-issued `requestcall` `sessId`.** The
