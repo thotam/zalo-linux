@@ -73,7 +73,7 @@ async function main() {
       // Linux call path — webviewTag + main-process webview/permission/console logging.
       await require('./patches/patch-call-diagnostics.js').main();
       await require('./patches/patch-call-support-linux.js').main();
-      await require('./patches/patch-zcall-linux-stub.js').main();
+      await require('./patches/patch-zcall-main-engine.js').main();
       await require('./patches/patch-call-trace.js').main();
       logger.success('All patches applied');
     }
