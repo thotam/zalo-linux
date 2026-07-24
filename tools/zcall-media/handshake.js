@@ -20,25 +20,25 @@ function handshake({ fromId, toId, callId, sessId, servers, timeoutMs = 3000, re
   return new Promise((resolve, reject) => {
     const sock = dgram.createSocket('udp4');
     const results = [];
-    const byNonce = new Map();                 // nonceHex -> { server, host, sentAt }
     const byHost = new Map();                  // relay source ip -> { server, host, sentAt }
     const targets = servers.map((s) => relayHost(s, relayPort));
 
     sock.on('error', (e) => { try { sock.close(); } catch (_) {} reject(e); });
 
-    // Correlate a reply to the relay we sent to: real relays don't echo our probe nonce in the
-    // 0x02 reply, so fall back to matching the UDP source address (rinfo.address == target host).
+    // Correlate a reply to the relay we sent to by UDP source address (rinfo.address == target
+    // host) — real relays do NOT echo our probe nonce. Each reply carries the relay's per-relay
+    // flowToken (offset 29) and the media destination is that relay's src IP on :4200 (per the
+    // 2026-07-14 connected-call capture).
     sock.on('message', (msg, rinfo) => {
       if (msg[0] !== 0x02) return;
       let parsed;
       try { parsed = parseResponse(msg); } catch (_) { return; }
-      const nonceHex = parsed.probeNonce.toString('hex');
-      const ctx = byNonce.get(nonceHex) || byHost.get(rinfo.address) || null;
+      const ctx = byHost.get(rinfo.address) || null;
       results.push({
         server: ctx ? ctx.server : null,
         relayAddr: parsed.relayAddr,
-        src: rinfo.address,
-        probeNonce: nonceHex,
+        src: rinfo.address,               // media dest = src:relayPort
+        flowToken: parsed.flowToken,      // per-relay token to stamp into outbound media [1..4]
         rttMs: ctx ? Date.now() - ctx.sentAt : null,
       });
     });
@@ -47,9 +47,7 @@ function handshake({ fromId, toId, callId, sessId, servers, timeoutMs = 3000, re
       for (let i = 0; i < targets.length; i++) {
         const { host, port } = targets[i];
         const nonce = crypto.randomBytes(4);
-        const ctx = { server: servers[i], host, sentAt: Date.now() };
-        byNonce.set(nonce.toString('hex'), ctx);
-        byHost.set(host, ctx);
+        byHost.set(host, { server: servers[i], host, sentAt: Date.now() });
         sock.send(buildProbe({ fromId, callId, probeNonce: nonce }), port, host);
         sock.send(buildRequest({ fromId, toId, callId, sessId }), port, host);
       }

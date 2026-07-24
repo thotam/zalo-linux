@@ -43,6 +43,22 @@ Duplex SRTP to the relay using the native `zsrtp` addon (build it first — see
 4. Success = `inboundAuthOk >= 1` (peer's real media decrypted on Linux). Payload is synthetic
    (opus is step 3). If inbound stays 0, check the §B.3 re-key boundary / the flowToken note.
 
+## Live connected call (SP2 2.3)
+
+Ring your own phone from Linux and receive the peer's real media on answer.
+
+- `../zcall-signaling/call-control.js` — `ring()` (sendRequestCall) + `endCall()`.
+- `live-call.js` — operator CLI: requestCall → handshake → ring → MediaSession → endCall.
+
+### Run live (own call)
+1. Build the addon (see `nativelibs/zsrtp/README.md`) if not already.
+2. `ZALO_REMOTE_DEBUG=1 /opt/Zalo/com.zalo.linux`
+3. `node tools/zcall-media/live-call.js <yourCalleeId> --addr config --dur 25000`
+   Then ANSWER your phone when it rings.
+4. Success = the phone rings and `inboundAuthOk >= 1` (peer's real media decrypted on Linux).
+   If it doesn't ring or no media returns, try `--addr server0` or `--addr relay`.
+   `endCall` runs automatically on exit.
+
 ## Tests
 ```
 node tools/zcall-media/__tests__/initzrtp.test.js
@@ -55,3 +71,18 @@ node tools/zcall-media/__tests__/srtp-kdf.test.js
 node nativelibs/zsrtp/__tests__/roundtrip.test.js
 node nativelibs/zsrtp/__tests__/crosscheck.test.js
 ```
+
+## Full-duplex audio (SP2 3)
+
+Hear the peer + speak, on a real connected call. Build both native addons first
+(`nativelibs/zsrtp` and `nativelibs/zaudio` — see their READMEs).
+
+- `zaudio.js` — loads the `nativelibs/zaudio` opus+miniaudio addon.
+- `live-audio.js` — operator CLI: the connected-call flow (like `live-call.js`) with the mic
+  driving outbound opus and inbound opus playing to the speaker.
+
+### Run live (own call)
+1. Build: `cd nativelibs/zaudio && npm i --ignore-scripts && npm run build:deps && npm run build`
+2. `ZALO_REMOTE_DEBUG=1 /opt/Zalo/com.zalo.linux &`
+3. `node tools/zcall-media/live-audio.js <yourCalleeId>` — answer on your phone and talk.
+   Use headphones to avoid echo.

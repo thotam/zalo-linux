@@ -44,21 +44,26 @@ assert.strictEqual(req152.subarray(31).toString('ascii'), sess152, 'req152 sessI
 // bad sessId length -> throw
 assert.throws(() => buildRequest({ fromId: 1, toId: 2, callId: 3, sessId: 'short' }), /30/, 'req rejects short sessId');
 
-// --- parseResponse: synthetic §A.2 buffer ---
+// --- parseResponse: synthetic §A.2 buffer (real layout: nonce@25, flowToken@29 — 2026-07-14) ---
+// Real relays put a PER-CALL nonce at offset 25 and a relay-assigned PER-RELAY flowToken at
+// offset 29 (confirmed by capture: media[1..4] == resp[29..33] byte-for-byte). Distinct values
+// here so a swapped/mislabelled read is caught.
 const addr = '1.2.3.4|5678';
+const respNonce = Buffer.from('11111111', 'hex');     // per-call nonce @25
+const flowToken = Buffer.from('ac95915d', 'hex');     // per-relay flowToken @29 (goes into media[1..4])
 const resp = Buffer.alloc(35 + addr.length);
 resp[0] = 0x02; resp[1] = 0x7e;
-resp.writeUInt32LE(0x11223344, 10);      // fromId echo
+resp.writeUInt32LE(0x11223344, 10);      // fromId echo (= media SSRC)
 resp[18] = 0x0b; resp[19] = 0x00; resp[20] = 0x02;
-resp.writeUInt32LE(0x0a, 25);            // callId echo
-nonce.copy(resp, 29);                     // probeNonce echo
+respNonce.copy(resp, 25);                 // per-call nonce
+flowToken.copy(resp, 29);                 // per-relay flowToken
 resp.writeUInt16LE(addr.length, 33);
 resp.write(addr, 35, 'ascii');
 const parsed = parseResponse(resp);
 assert.strictEqual(parsed.type, 0x02, 'resp type');
 assert.strictEqual(parsed.fromId, 0x11223344, 'resp fromId');
-assert.strictEqual(parsed.callId, 0x0a, 'resp callId');
-assert.strictEqual(parsed.probeNonce.toString('hex'), 'deadbeef', 'resp nonce echo');
+assert.strictEqual(parsed.nonce.toString('hex'), '11111111', 'resp per-call nonce @25');
+assert.strictEqual(parsed.flowToken.toString('hex'), 'ac95915d', 'resp per-relay flowToken @29');
 assert.deepStrictEqual(parsed.relayAddr, { ip: '1.2.3.4', port: '5678' }, 'resp relayAddr');
 
 // wrong type -> throw

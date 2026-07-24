@@ -23,9 +23,12 @@ async function main() {
     fromId: config.fromId, toId: config.toId, callId, sessId: config.sessId, servers: config.servers,
   });
   if (!replies.length) throw new Error('no relay replied to InitZRTP — cannot open media');
-  const relayAddr = replies[0].relayAddr;
-
-  const s = new MediaSession({ key, ssrc: config.fromId, relayAddr });
+  const r0 = replies[0];
+  // Media dest = the relay that REPLIED, on :4200 (its UDP source), stamped with its per-relay
+  // flowToken (offset 29) — NOT the ASCII relayAddr@35 (2026-07-14 capture §D/§E). NOTE: this tool
+  // runs InitZRTP on a SEPARATE socket, so inbound media returns to a dead port — use live-call.js
+  // (open() on the media socket) for a real duplex/connected test.
+  const s = new MediaSession({ key, ssrc: config.fromId, relayAddr: { host: r0.src, port: 4200 }, flowToken: r0.flowToken });
   await new Promise((res) => s.bind(res));
 
   let inOk = 0, inFail = 0, seenFlow = null;
@@ -41,7 +44,7 @@ async function main() {
 
   console.log('[live-media] inboundAuthOk ' + inOk + '  authfail ' + inFail);
   console.log('[live-media] inbound flowToken ' + (seenFlow ? mask(seenFlow.toString('hex')) : '<none>'));
-  console.log('[live-media] relay ' + mask((relayAddr.ip || '') + '|' + (relayAddr.port || '')));
+  console.log('[live-media] relay ' + mask((r0.src || '') + '|4200') + '  flowToken ' + mask((r0.flowToken || Buffer.alloc(0)).toString('hex')));
   console.error('[live-media] ' + (inOk ? 'OK — decrypted peer real inbound media on Linux' : 'no inbound decrypted (see §B.3 re-key / flowToken notes)'));
   process.exit(inOk ? 0 : 1);
 }

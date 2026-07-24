@@ -25,11 +25,15 @@ function isZrtcWrapped(pkt) {
   return pkt.length > 5 && ZRTC_MEDIA_TYPES.has(pkt[0]) && (pkt[5] >> 6) === 2;
 }
 
-// Candidate framings to try per packet: standard SRTP as-is, and (if it looks zrtc-wrapped)
-// with the 5-byte zrtc prefix stripped.
+// Candidate framings to try per packet (2026-07-14 capture §C): standard SRTP as-is; the 5-byte
+// zrtc prefix stripped (OUTBOUND 0x03: flowToken@1..4, RTP@5); and the 1-byte prefix stripped
+// (INBOUND 0x04 relay-forwarded: no flowToken, RTP@1).
 function framings(pkt) {
   const out = [{ off: 0, pkt }];
-  if (isZrtcWrapped(pkt)) out.push({ off: 5, pkt: pkt.subarray(5) });
+  if (pkt.length > 5 && ZRTC_MEDIA_TYPES.has(pkt[0])) {
+    if ((pkt[5] >> 6) === 2) out.push({ off: 5, pkt: pkt.subarray(5) }); // 0x03 outbound
+    if ((pkt[1] >> 6) === 2) out.push({ off: 1, pkt: pkt.subarray(1) }); // 0x04 inbound
+  }
   return out;
 }
 
