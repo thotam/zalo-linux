@@ -3,6 +3,24 @@
 // Loaded on a macOS runner where the mac frameworks exist.
 const fs = require('fs');
 const path = require('path');
+
+// Call-id resolution: defaults reproduce SP1's small sample; env overrides let the
+// wide-value loopback capture use large, distinct-byte ids (all > 255) to disambiguate
+// REQUEST endianness / field offsets (SP1 Appendix C TENTATIVE).
+function resolveIds(env) {
+  const int = (v, d) => (v === undefined || v === null || v === '' || isNaN(parseInt(v, 10)) ? d : parseInt(v, 10));
+  return {
+    fromId: int(env.FROM_ID, 111),
+    toId: int(env.TO_ID, 222),
+    callId: int(env.CALL_ID, 10),
+    sessId: env.SESS_ID || 'SP1CAPTURE',
+  };
+}
+module.exports = { resolveIds };
+
+// Test hook: exit before touching the mac addon when required by a unit test.
+if (process.env.ZCALL_HARNESS_TEST) return;
+
 const OUT = process.env.OUT_DIR || 'scratch/zcall-analysis';
 // Node 8 (the ABI-57 runtime that loads zcall_mac.node) lacks mkdirSync({recursive}).
 function mkdirp(dir) {
@@ -56,9 +74,10 @@ if (process.env.MODE !== 'call') process.exit(0);
 // appended: MODE=call drives a controlled outbound call against loopback.
 if (process.env.MODE === 'call') {
   const CAP_PORT = 59000; // loopback port we point RTP/RTCP at
+  const ids = resolveIds(process.env);
   const cfg = {
-    fromId: 111, toId: 222, protocol: 3, status: 3, callId: 10,
-    sessId: 'SP1CAPTURE',
+    fromId: ids.fromId, toId: ids.toId, protocol: 3, status: 3, callId: ids.callId,
+    sessId: ids.sessId,
     settings: { logDebug: 1, dynamicBitrate: 1, checkTimeOut: 1500 },
     changeZRTP: { enable: 1, threshold: 5 },
     rtpIP: '127.0.0.1:' + CAP_PORT,

@@ -43,3 +43,4 @@ scratchpad/
 # Superpowers SDD scratch (briefs, reports, review diffs — never commit)
 .superpowers/
 scratch/zcall-analysis/
+tools/zcall-re/sample-keying-redacted.json

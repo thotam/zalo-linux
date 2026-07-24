@@ -57,7 +57,10 @@ jobs:
           arch -x86_64 "$NODE8" tools/zcall-re/udp-responder.js &
           RESP_PID=$!
           sleep 0.5
-          MODE=call OUT_DIR=scratch/zcall-analysis arch -x86_64 "$NODE8" tools/zcall-re/harness.js || true
+          # Wide, distinct-byte ids (all > 255) to disambiguate REQUEST endianness/offsets (SP1 App. C).
+          MODE=call OUT_DIR=scratch/zcall-analysis \
+            FROM_ID=16909060 TO_ID=84281096 CALL_ID=287454020 SESS_ID=WIDEVALUECAP \
+            arch -x86_64 "$NODE8" tools/zcall-re/harness.js || true
           sudo kill $RESP_PID || true
           sleep 1
           sudo kill $TCPDUMP_PID || true
