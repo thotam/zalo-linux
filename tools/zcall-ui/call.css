@@ -1,0 +1,129 @@
+:root {
+  --zalo-blue: #0190f3;
+  --red-end: #ee4b44;
+  --ink: #1a1a1a;
+  --line: #e1e4ea;
+  --titlebar-bg: #f3f3f3;
+  --close-hover: #c42b1c;
+  --timer-green: #0a4f30;
+  --controlbar-bg: rgba(20,20,20,.9);
+  --pill-bg: rgba(255,255,255,.10);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body {
+  font-family: 'Inter', 'Segoe UI', 'Roboto', system-ui, sans-serif;
+  overflow: hidden;
+  user-select: none;
+  color: #fff;
+}
+#titlebar {
+  height: 32px; display: flex; align-items: center; gap: 8px;
+  padding: 0 0 0 12px; background: var(--titlebar-bg); color: var(--ink);
+  -webkit-app-region: drag;
+}
+#titlebar .tb-icon { color: var(--zalo-blue); font-size: 16px; }
+#titlebar .tb-title { font-size: 13px; font-weight: 600; }
+.tb-spacer { flex: 1; }
+.wc {
+  -webkit-app-region: no-drag; width: 40px; height: 32px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; color: #46556a;
+}
+.wc:hover { background: rgba(0,0,0,.06); }
+.wc-close:hover { background: var(--close-hover); color: #fff; }
+.wc-min-i { width: 10px; height: 1px; background: currentColor; }
+.wc-max-i { width: 9px; height: 9px; border: 1px solid currentColor; }
+.wc-x { position: relative; width: 12px; height: 12px; }
+.wc-x::before, .wc-x::after {
+  content: ''; position: absolute; top: 50%; left: 0; width: 12px; height: 1px; background: currentColor;
+}
+.wc-x::before { transform: rotate(45deg); }
+.wc-x::after { transform: rotate(-45deg); }
+#stage {
+  position: absolute; top: 32px; left: 0; right: 0; bottom: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding-bottom: 96px;   /* lift the avatar above center, over the bottom bar (like Windows) */
+  overflow: hidden;
+  background: linear-gradient(160deg, #0068ff 0%, #004bb9 100%);   /* fallback */
+}
+#bg {
+  position: absolute; inset: 0;
+  background-size: cover; background-position: center;
+  filter: blur(28px) brightness(0.75); transform: scale(1.15);
+  opacity: 0; transition: opacity .25s;
+}
+#bg.on { opacity: 1; }
+#avatar-wrap { position: relative; width: 158px; height: 158px; transition: width .2s, height .2s; }
+#avatar {
+  position: absolute; inset: 4px; border-radius: 50%;
+  background-size: cover; background-position: center;
+  border: 2px solid rgba(255,255,255,.6);
+  box-shadow: 0 6px 24px rgba(0,0,0,.25);
+}
+#ring {
+  position: absolute; inset: 0; border-radius: 50%;
+  border: 3px solid rgba(255,255,255,.3);
+  border-top-color: #fff; display: none;
+}
+/* Connecting: smaller avatar (~118px) with a spinning ring around it. */
+body[data-state="calling"] #avatar-wrap { width: 130px; height: 130px; }
+body[data-state="calling"] #avatar { inset: 6px; border-width: 0; }
+body[data-state="calling"] #ring { display: block; animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+#status { margin-top: 18px; font-size: 15px; text-shadow: 0 1px 4px rgba(0,0,0,.4); min-height: 20px; }
+#timer {
+  position: absolute; top: 8px; left: 8px; display: none;
+  background: var(--timer-green); color: #fff; font-size: 13px; font-weight: 600;
+  padding: 2px 8px; border-radius: 3px;
+}
+body[data-state="connected"] #timer { display: block; }
+#endtoast {
+  position: absolute; display: none; background: rgba(0,0,0,.72); color: #fff;
+  font-size: 13px; padding: 8px 14px; border-radius: 6px;
+}
+body[data-state="ended"] #endtoast { display: block; }
+#bar {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 56px;
+  display: flex; align-items: center; justify-content: center; gap: 12px; padding: 0 16px;
+  background: var(--controlbar-bg); backdrop-filter: blur(8px);
+}
+.ctl {
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none; cursor: pointer; background: transparent; color: #fff;
+}
+/* camera / mic split-button pill */
+.pill {
+  display: inline-flex; align-items: center; height: 40px;
+  background: var(--pill-bg); border-radius: 20px; overflow: hidden;
+}
+.pill:hover { background: rgba(255,255,255,.16); }
+.pill-main { width: 42px; height: 40px; }
+.pill-main .zic { font-size: 22px; }
+#btn-cam .zic { font-size: 18px; }   /* camcorder glyph is wider — balance mic */
+.pill-chev { width: 22px; height: 40px; color: rgba(255,255,255,.85); }
+.pill-chev .zic { font-size: 12px; }
+/* hangup */
+#btn-end {
+  width: 40px; height: 40px; border-radius: 50%; background: var(--red-end); color: #fff;
+}
+#btn-end:hover { background: #e5403a; }
+#btn-end .zic { font-size: 18px; transform: rotate(135deg); }
+/* gear pinned right */
+#btn-gear { position: absolute; right: 14px; top: 50%; transform: translateY(-50%); width: 40px; height: 40px; }
+#btn-gear .zic { font-size: 22px; }
+#btn-gear:hover { background: rgba(255,255,255,.12); border-radius: 8px; }
+.btn-active .zic { color: var(--red-end) !important; }  /* mic muted */
+#mic-menu {
+  position: absolute; left: 50%; transform: translateX(-50%); bottom: 62px; display: none;
+  background: #fff; color: var(--ink); border-radius: 8px; min-width: 268px; max-width: 320px;
+  box-shadow: 0 8px 28px rgba(0,0,0,.28); padding: 6px 0; font-size: 13px;
+  border: 1px solid rgba(0,0,0,.08);
+}
+#mic-menu.on { display: block; }
+#mic-menu .mh { font-weight: 700; padding: 8px 14px 4px; display: flex; gap: 8px; align-items: center; color: #1a1a1a; }
+#mic-menu .mh .zic { font-size: 15px; color: #46556a; }
+#mic-menu .mi { padding: 7px 14px 7px 34px; cursor: pointer; position: relative; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#mic-menu .mi:hover { background: #f2f2f2; }
+#mic-menu .mi .mi-check { position: absolute; left: 14px; color: #1a1a1a; font-weight: 700; }
+#mic-menu .sep { height: 1px; background: rgba(0,0,0,.08); margin: 4px 0; }

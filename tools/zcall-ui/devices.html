@@ -1,0 +1,39 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https: data:; style-src 'self' 'unsafe-inline'; font-src 'self'" />
+  <link rel="stylesheet" href="icons.css" />
+  <link rel="stylesheet" href="devices.css" />
+  <title>Tình trạng thiết bị</title>
+</head>
+<body>
+  <div id="titlebar">
+    <span class="tb-title" id="tb-title">Tình trạng thiết bị</span>
+    <span class="tb-spacer"></span>
+    <div class="wc" id="wc-min" title="Thu nhỏ"><i class="wc-min-i"></i></div>
+    <div class="wc" id="wc-max" title="Phóng to"><i class="wc-max-i"></i></div>
+    <div class="wc wc-close" id="wc-close" title="Đóng"><i class="wc-x"></i></div>
+  </div>
+
+  <div class="dlg-body">
+    <div class="statbox"><span class="zic zic-mic sb-ic"></span><span class="sb-tx">Micro đang hoạt động</span><span class="ok-check">✓</span></div>
+    <div class="dlg-label">Micro</div>
+    <select class="dlg-select" id="sel-mic"></select>
+    <div class="meter" id="mic-meter"></div>
+
+    <div class="statbox"><span class="zic zic-speaker sb-ic"></span><span class="sb-tx">Loa/tai nghe đang hoạt động</span><span class="ok-check">✓</span></div>
+    <div class="dlg-label">Loa/tai nghe</div>
+    <select class="dlg-select" id="sel-spk"></select>
+
+    <div class="dlg-label">Kiểm tra loa/tai nghe</div>
+    <div class="test-row"><button class="test-play" id="test-play">▶</button><div class="test-bar"><div class="test-fill" id="test-fill"></div></div></div>
+
+    <div class="dlg-label">Âm lượng</div>
+    <input type="range" class="dlg-slider" id="vol" min="0" max="100" value="70" />
+  </div>
+  <div class="dlg-foot"><button class="dlg-cancel" id="dlg-cancel">Hủy</button></div>
+
+  <script src="devices.js"></script>
+</body>
+</html>

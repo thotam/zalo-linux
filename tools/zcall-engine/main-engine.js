@@ -19,14 +19,21 @@ function createMainEngine(opts) {
   const getZAudio = () => opts.ZAudio || require('../zcall-media/zaudio.js').ZAudio;
   const os = opts.os || require('os');
   const randomCallId = opts.randomCallId || (() => Math.floor(Math.random() * 1e9));
+  const ui = opts.ui || null;
+  const uiCloseDelay = typeof opts.uiCloseDelay === 'number' ? opts.uiCloseDelay : 1200;
+  const uiSafe = (fn) => { if (!ui) return; try { fn(); } catch (e) { zlog('ui err', e && e.message); } };
   const calls = new Map();   // callId(str) -> { callId, calleeId, session, audio, config }
   let current = null;        // the outgoing call awaiting its 401 config
 
   const emit = (type, command, data) => { try { sendToRender({ type, command, data }); } catch (e) { zlog('emit err', e && e.message); } };
 
-  function startOutgoing(calleeId, type) {
+  function startOutgoing(partner, type) {
+    const calleeId = partner && partner.id;
     const callId = randomCallId();
-    current = { callId, calleeId: String(calleeId), type: type || 1 };
+    current = { callId, calleeId: String(calleeId), type: type || 1,
+                partner: { id: String(calleeId),
+                           name: (partner && (partner.name || partner.dName || partner.displayName)) || String(calleeId),
+                           avatar: (partner && (partner.avatar || partner.avatarUrl)) || null } };
     calls.set(String(callId), current);
     zlog('makeCall', calleeId, '-> 401', callId);
     emit('sendSignal', 401, { calleeId: String(calleeId), callId, codec: '[]', type: type || 1 });
@@ -62,6 +69,13 @@ function createMainEngine(opts) {
     zlog('open OK relay', opened.host, '-> 416 (ring)');
     emit('sendSignal', 416, { calleeId: c.calleeId, rtcpAddress: opened.host + ':4200', rtpAddress: opened.host + ':4200', codec: OPUS_CODEC, extendData: JSON.stringify(extendData), session: cfg.sessId, callId });
     emit('update', 'callState', { state: 'calling', callId });
+    uiSafe(() => {
+      ui.show(c.partner);
+      ui.setState('calling', { name: c.partner.name });
+      let devs = { capture: [], playback: [] };
+      try { devs = audio.listDevices(); } catch (e) { zlog('listDevices err', e && e.message); }
+      ui.setDevices(Object.assign({ selectedIn: -1, selectedOut: -1 }, devs));
+    });
     audio.start((opus) => { if (c._outTick) c._outTick(); try { session.send(opus); } catch (_) {} });   // stream during ringing
   }
 
@@ -69,8 +83,10 @@ function createMainEngine(opts) {
     const c = calls.get(String(callId)) || current;
     if (!c) return;
     zlog('answer', callId, '-> 408');
+    c.answered = true;
     emit('sendSignal', 408, { calleeId: c.calleeId, callId: Number(c.callId) });
     emit('update', 'callState', { state: 'connected', callId: c.callId });
+    uiSafe(() => ui.setState('connected', { connectedAt: Date.now(), name: c.partner && c.partner.name }));
   }
 
   function teardown(callId) {
@@ -82,6 +98,7 @@ function createMainEngine(opts) {
     calls.delete(String(c.callId));
     if (current && String(current.callId) === String(c.callId)) current = null;
     emit('update', 'callState', { state: 'free', callId: c.callId });
+    uiSafe(() => { ui.setState('ended', { name: c.partner && c.partner.name }); setTimeout(() => uiSafe(() => ui.close()), uiCloseDelay); });
   }
 
   function handleSendToNative(t) {
@@ -90,7 +107,7 @@ function createMainEngine(opts) {
     zlog('S<-', m.type, m.command, m.data && m.data.act);
     if (m.type === 'request' && m.command === 'makeCall') {
       const p = m.data && m.data.partner && m.data.partner[0];
-      if (p && !current) startOutgoing(p.id, m.data.type);   // one outgoing at a time (makeCall repeats)
+      if (p && !current) startOutgoing(p, m.data.type);   // one outgoing at a time (makeCall repeats)
     } else if (m.type === 'recvSignal' && Number(m.command) === 401) {
       onConfig(m.data).catch((e) => zlog('onConfig err', e && e.message));
     } else if (m.type === 'control' && m.data && m.data.act) {
@@ -100,6 +117,21 @@ function createMainEngine(opts) {
     } else if (m.type === 'request' && m.command === 'endCall') {
       teardown(m.data && m.data.callId);
     }
+  }
+
+  if (ui) {
+    ui.on('end', () => {
+      const c = current;
+      if (c) {
+        // Ringing (not yet answered) -> 405 cancel; answered -> 409 endcall. Both read `toId`.
+        if (c.answered) emit('sendSignal', 409, { toId: c.calleeId, callId: Number(c.callId) });
+        else emit('sendSignal', 405, { toId: c.calleeId, callId: Number(c.callId), callType: c.type || 1 });
+      }
+      teardown(c && c.callId);
+    });
+    ui.on('mute', (v) => { const c = current; if (c && c.audio) try { c.audio.setMute(!!v); } catch (e) { zlog('setMute err', e && e.message); } });
+    ui.on('selectInput', (i) => { const c = current; if (c && c.audio) try { c.audio.setInputDevice(i); } catch (e) { zlog('setInput err', e && e.message); } });
+    ui.on('selectOutput', (i) => { const c = current; if (c && c.audio) try { c.audio.setOutputDevice(i); } catch (e) { zlog('setOutput err', e && e.message); } });
   }
 
   return { handleSendToNative, start() {}, stop() { if (current) teardown(current.callId); } };

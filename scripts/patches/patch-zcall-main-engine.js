@@ -9,14 +9,22 @@ const logger = require('../utils/logger');
 const REPO = path.join(__dirname, '..', '..');
 const MAIN_JS = path.join(REPO, 'app', 'main-dist', 'main.js');
 const ENGINE_DIR = path.join(REPO, 'app', 'native', 'zcall-engine');
+const UI_SRC = path.join(REPO, 'tools', 'zcall-ui');
+const UI_DIR = path.join(REPO, 'app', 'native', 'zcall-ui');
+const FONTS_DIR = path.join(REPO, 'app', 'pc-dist', 'fonts');
 const BUILDER = path.join(REPO, 'nativelibs', 'builder.js');
 const MARKER = '__zeng.handleSendToNative';
 const REQCAP = 'globalThis.__zengRequire=require;';
 const ANCHOR = '((e,t)=>{t._optional?delete t._optional:W(),S(t)})';
 const REPLACEMENT =
   "((e,t)=>{try{if(t&&t._optional)delete t._optional;var _R=globalThis.__zengRequire;" +
-  "if(!globalThis.__zeng){var _p=_R('path').join(__dirname,'..','native','zcall-engine','main-engine.js');" +
-  "globalThis.__zeng=_R(_p).createMainEngine({sendToRender:function(mm){w.webContents.send(mm.type==='update'?'call-update':'call-send-signal',mm.command,mm.data)}});}" +
+  "if(!globalThis.__zeng){var _P=_R('path');var _b=_P.join(__dirname,'..','native');" +
+  "var _mkUi=function(){try{var _el=_R('electron');var _u=_P.join(_b,'zcall-ui');" +
+  "return _R(_P.join(_u,'call-ui.js')).createCallUI({BrowserWindow:_el.BrowserWindow,ipcMain:_el.ipcMain," +
+  "htmlPath:_P.join(_u,'call.html'),preloadPath:_P.join(_u,'preload.js'),devicesHtmlPath:_P.join(_u,'devices.html')});}catch(_ue){try{console.error('[ZENGINE ui]',_ue&&_ue.stack||_ue)}catch(__){}return null;}};" +
+  "globalThis.__zeng=_R(_P.join(_b,'zcall-engine','main-engine.js')).createMainEngine({" +
+  "sendToRender:function(mm){w.webContents.send(mm.type==='update'?'call-update':'call-send-signal',mm.command,mm.data)}," +
+  "ui:_mkUi()});}" +
   "globalThis.__zeng.handleSendToNative(t);}catch(_e){try{console.error('[ZENGINE]',_e&&_e.stack||_e)}catch(__){}}})";
 
 const COPY = [
@@ -75,6 +83,19 @@ async function main() {
   for (const addon of ['zsrtp', 'zaudio']) {
     fs.copySync(path.join(REPO, 'nativelibs', addon, 'build', 'Release', addon + '.node'), path.join(mediaDir, addon + '.node'));
   }
+  // Copy the call-window UI (minus its tests) to app/native/zcall-ui/.
+  fs.ensureDirSync(UI_DIR);
+  fs.copySync(UI_SRC, UI_DIR, { filter: (src) => !src.split(path.sep).includes('__tests__') });
+  // Reuse the app's own icon font for the call glyphs (fail loud if the render bundle moved it).
+  const fontMatch = fs.existsSync(FONTS_DIR)
+    ? fs.readdirSync(FONTS_DIR).find((f) => /^zalo-font\..*\.ttf$/.test(f))
+    : null;
+  if (!fontMatch) {
+    throw new Error('patch-zcall-main-engine: zalo-font.*.ttf not found in ' + logger.formatPath(FONTS_DIR) + ' — render bundle layout changed');
+  }
+  fs.ensureDirSync(path.join(UI_DIR, 'assets'));
+  fs.copySync(path.join(FONTS_DIR, fontMatch), path.join(UI_DIR, 'assets', 'zalo-font.ttf'));
+
   // Patch main.js.
   let s = fs.readFileSync(MAIN_JS, 'utf8');
   s = applyMainPatch(s);

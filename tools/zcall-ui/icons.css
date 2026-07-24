@@ -1,0 +1,25 @@
+@font-face {
+  font-family: 'zalo-font';
+  src: url('assets/zalo-font.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+}
+.zic {
+  font-family: 'zalo-font';
+  font-style: normal;
+  font-weight: normal;
+  line-height: 1;
+  -webkit-font-smoothing: antialiased;
+  speak: none;
+}
+.zic::before { content: attr(data-glyph); }
+.zic-endcall::before   { content: '\eb9e'; }
+.zic-mic::before       { content: '\ec59'; }
+.zic-mic-off::before   { content: '\ec5b'; }
+.zic-cam::before       { content: '\edf4'; }
+.zic-cam-off::before   { content: '\edf3'; }
+.zic-speaker::before   { content: '\ed5e'; }
+.zic-gear::before      { content: '\ed1a'; }
+.zic-chevron-up::before   { content: '\ea8d'; }
+.zic-chevron-down::before { content: '\ea87'; }
+.zic-call::before      { content: '\ea3c'; }

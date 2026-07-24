@@ -10,4 +10,8 @@ assert.ok(!out.includes(':W(),S(t)})).on("call-init"'), 'dead child handler repl
 assert.ok(out.includes('call-init'), 'call-init handler preserved');
 assert.strictEqual(applyMainPatch(out), out, 'idempotent');
 assert.throws(() => applyMainPatch('no anchor here'), /anchor/, 'fail-loud');
+assert.ok(out.includes('createCallUI'), 'engine created with a call UI controller');
+assert.ok(out.includes('zcall-ui'), 'references zcall-ui dir');
+assert.ok(out.includes('call.html'), 'passes the call.html path');
+assert.ok(out.includes('devices.html'), 'passes the device-window path');
 console.log('OK patch-zcall-main-engine');

@@ -19,7 +19,12 @@ class ZAudio : public Napi::ObjectWrap<ZAudio> {
   OpusDecoder* dec_ = nullptr;
   int sampleRate_ = 16000, channels_ = 1, frameSamples_ = 320;
   double micGain_ = 1.0;   // software gain applied to captured PCM before opus_encode
+  bool muted_ = false;     // when true, captured mic PCM is dropped before encode
   ma_device device_;
+  ma_context context_;
+  bool ctxInit_ = false;
+  std::vector<ma_device_id> captureIds_, playbackIds_;   // parallel to listDevices() indices
+  int selCapture_ = -1, selPlayback_ = -1;               // -1 = system default
   bool running_ = false;
   Napi::ThreadSafeFunction tsfn_;
   std::vector<opus_int16> capAccum_;              // accumulate mic PCM to 20 ms frames
@@ -31,6 +36,13 @@ class ZAudio : public Napi::ObjectWrap<ZAudio> {
   void Start(const Napi::CallbackInfo& info);
   void Play(const Napi::CallbackInfo& info);
   void Stop(const Napi::CallbackInfo& info);
+  void SetMute(const Napi::CallbackInfo& info);
+  Napi::Value ListDevices(const Napi::CallbackInfo& info);
+  void SetInputDevice(const Napi::CallbackInfo& info);
+  void SetOutputDevice(const Napi::CallbackInfo& info);
+  bool EnsureContext();
+  bool InitAndStartDevice();
+  void RestartDevice();
   static void DataCB(ma_device* dev, void* out, const void* in, ma_uint32 frames);
 };
 
@@ -41,6 +53,10 @@ Napi::Object ZAudio::Init(Napi::Env env, Napi::Object exports) {
     InstanceMethod("start", &ZAudio::Start),
     InstanceMethod("play", &ZAudio::Play),
     InstanceMethod("stop", &ZAudio::Stop),
+    InstanceMethod("setMute", &ZAudio::SetMute),
+    InstanceMethod("listDevices", &ZAudio::ListDevices),
+    InstanceMethod("setInputDevice", &ZAudio::SetInputDevice),
+    InstanceMethod("setOutputDevice", &ZAudio::SetOutputDevice),
   });
   exports.Set("ZAudio", f);
   return exports;
@@ -67,6 +83,7 @@ ZAudio::ZAudio(const Napi::CallbackInfo& info) : Napi::ObjectWrap<ZAudio>(info) 
 
 ZAudio::~ZAudio() {
   if (running_) { ma_device_uninit(&device_); running_ = false; }
+  if (ctxInit_) { ma_context_uninit(&context_); ctxInit_ = false; }
   if (enc_) opus_encoder_destroy(enc_);
   if (dec_) opus_decoder_destroy(dec_);
 }
@@ -94,7 +111,10 @@ Napi::Value ZAudio::DecodeFrame(const Napi::CallbackInfo& info) {
 
 void ZAudio::DataCB(ma_device* dev, void* out, const void* in, ma_uint32 frames) {
   ZAudio* self = static_cast<ZAudio*>(dev->pUserData);
-  if (in) {
+  if (in && self->muted_) {
+    self->capAccum_.clear();   // muted: discard mic, send nothing
+  }
+  if (in && !self->muted_) {
     const opus_int16* mic = static_cast<const opus_int16*>(in);
     const ma_uint32 total = frames * self->channels_;
     if (self->micGain_ == 1.0) {
@@ -136,15 +156,7 @@ void ZAudio::Start(const Napi::CallbackInfo& info) {
   if (running_) return;
   if (info.Length() < 1 || !info[0].IsFunction()) { Napi::TypeError::New(env, "start(onFrame)").ThrowAsJavaScriptException(); return; }
   tsfn_ = Napi::ThreadSafeFunction::New(env, info[0].As<Napi::Function>(), "zaudio-onframe", 0, 1);
-  ma_device_config cfg = ma_device_config_init(ma_device_type_duplex);
-  cfg.sampleRate = sampleRate_;
-  cfg.capture.format = ma_format_s16;  cfg.capture.channels = channels_;
-  cfg.playback.format = ma_format_s16; cfg.playback.channels = channels_;
-  cfg.periodSizeInFrames = frameSamples_;
-  cfg.dataCallback = &ZAudio::DataCB;
-  cfg.pUserData = this;
-  if (ma_device_init(NULL, &cfg, &device_) != MA_SUCCESS) { tsfn_.Release(); tsfn_ = Napi::ThreadSafeFunction(); Napi::Error::New(env, "ma_device_init failed").ThrowAsJavaScriptException(); return; }
-  if (ma_device_start(&device_) != MA_SUCCESS) { ma_device_uninit(&device_); tsfn_.Release(); tsfn_ = Napi::ThreadSafeFunction(); Napi::Error::New(env, "ma_device_start failed").ThrowAsJavaScriptException(); return; }
+  if (!InitAndStartDevice()) { tsfn_.Release(); tsfn_ = Napi::ThreadSafeFunction(); Napi::Error::New(env, "ma_device_init/start failed").ThrowAsJavaScriptException(); return; }
   running_ = true;
 }
 
@@ -163,6 +175,74 @@ void ZAudio::Play(const Napi::CallbackInfo& info) {
 void ZAudio::Stop(const Napi::CallbackInfo& info) {
   if (running_) { ma_device_uninit(&device_); running_ = false; }
   if (tsfn_) { tsfn_.Release(); tsfn_ = Napi::ThreadSafeFunction(); }
+}
+
+void ZAudio::SetMute(const Napi::CallbackInfo& info) {
+  if (info.Length() > 0) muted_ = info[0].ToBoolean().Value();
+}
+
+bool ZAudio::EnsureContext() {
+  if (ctxInit_) return true;
+  if (ma_context_init(NULL, 0, NULL, &context_) != MA_SUCCESS) return false;
+  ctxInit_ = true;
+  return true;
+}
+
+Napi::Value ZAudio::ListDevices(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  Napi::Object out = Napi::Object::New(env);
+  Napi::Array cap = Napi::Array::New(env), play = Napi::Array::New(env);
+  captureIds_.clear(); playbackIds_.clear();
+  ma_device_info* pPlay = nullptr; ma_uint32 nPlay = 0;
+  ma_device_info* pCap = nullptr;  ma_uint32 nCap = 0;
+  if (EnsureContext() &&
+      ma_context_get_devices(&context_, &pPlay, &nPlay, &pCap, &nCap) == MA_SUCCESS) {
+    for (ma_uint32 i = 0; i < nCap; i++) {
+      captureIds_.push_back(pCap[i].id);
+      Napi::Object d = Napi::Object::New(env);
+      d.Set("index", (int)i); d.Set("name", pCap[i].name); d.Set("isDefault", (bool)pCap[i].isDefault);
+      cap.Set(i, d);
+    }
+    for (ma_uint32 i = 0; i < nPlay; i++) {
+      playbackIds_.push_back(pPlay[i].id);
+      Napi::Object d = Napi::Object::New(env);
+      d.Set("index", (int)i); d.Set("name", pPlay[i].name); d.Set("isDefault", (bool)pPlay[i].isDefault);
+      play.Set(i, d);
+    }
+  }
+  out.Set("capture", cap); out.Set("playback", play);
+  return out;
+}
+
+bool ZAudio::InitAndStartDevice() {
+  ma_device_config cfg = ma_device_config_init(ma_device_type_duplex);
+  cfg.sampleRate = sampleRate_;
+  cfg.capture.format = ma_format_s16;  cfg.capture.channels = channels_;
+  cfg.playback.format = ma_format_s16; cfg.playback.channels = channels_;
+  cfg.periodSizeInFrames = frameSamples_;
+  cfg.dataCallback = &ZAudio::DataCB;
+  cfg.pUserData = this;
+  if (selCapture_  >= 0 && selCapture_  < (int)captureIds_.size())  cfg.capture.pDeviceID  = &captureIds_[selCapture_];
+  if (selPlayback_ >= 0 && selPlayback_ < (int)playbackIds_.size()) cfg.playback.pDeviceID = &playbackIds_[selPlayback_];
+  ma_context* ctx = EnsureContext() ? &context_ : NULL;
+  if (ma_device_init(ctx, &cfg, &device_) != MA_SUCCESS) return false;
+  if (ma_device_start(&device_) != MA_SUCCESS) { ma_device_uninit(&device_); return false; }
+  return true;
+}
+
+void ZAudio::RestartDevice() {
+  if (running_) { ma_device_uninit(&device_); running_ = false; }
+  if (InitAndStartDevice()) running_ = true;
+}
+
+void ZAudio::SetInputDevice(const Napi::CallbackInfo& info) {
+  selCapture_ = (info.Length() > 0) ? info[0].As<Napi::Number>().Int32Value() : -1;
+  if (running_) RestartDevice();
+}
+
+void ZAudio::SetOutputDevice(const Napi::CallbackInfo& info) {
+  selPlayback_ = (info.Length() > 0) ? info[0].As<Napi::Number>().Int32Value() : -1;
+  if (running_) RestartDevice();
 }
 
 static Napi::Object InitAll(Napi::Env env, Napi::Object exports) { return ZAudio::Init(env, exports); }
