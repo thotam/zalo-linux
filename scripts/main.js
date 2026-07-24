@@ -74,6 +74,7 @@ async function main() {
       await require('./patches/patch-call-diagnostics.js').main();
       await require('./patches/patch-call-support-linux.js').main();
       await require('./patches/patch-zcall-main-engine.js').main();
+      await require('./patches/patch-call-log.js').main();
       await require('./patches/patch-call-trace.js').main();
       logger.success('All patches applied');
     }

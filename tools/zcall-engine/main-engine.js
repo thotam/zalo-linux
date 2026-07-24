@@ -12,6 +12,12 @@ function zlog() {
 }
 function parseAddr(s) { const m = String(s).split(/[:|]/); return { host: m[0], port: Number(m[1]) || 4200 }; }
 
+// `control answer` non-zero status -> chat call-log reason. Status meanings RE'd from the native
+// engine (ZaloCall.exe, zcallinfosignal.cpp caller answer-handler): 1=busy, 3=reject, 5=zrtp-fail,
+// 6=timeout/no-answer, 0=accept. Reason enum (render): 1=CALLEE_BUSY "Người nhận bận",
+// 3=CALLEE_REJECT "Người nhận từ chối", 2=generic ("Cuộc gọi thoại đi 0 giây"). Unknown -> generic.
+const ANSWER_STATUS_REASON = { 1: 1, 3: 3, 5: 2, 6: 2 };
+
 function createMainEngine(opts) {
   opts = opts || {};
   const sendToRender = opts.sendToRender || (() => {});
@@ -79,25 +85,43 @@ function createMainEngine(opts) {
     audio.start((opus) => { if (c._outTick) c._outTick(); try { session.send(opus); } catch (_) {} });   // stream during ringing
   }
 
-  function onAnswer(callId) {
+  function onAnswer(callId, data) {
     const c = calls.get(String(callId)) || current;
     if (!c) return;
-    zlog('answer', callId, '-> 408');
+    zlog('answer', callId, 'status=', data && data.status, '-> 408');
     c.answered = true;
+    c.connectedAt = Date.now();
     emit('sendSignal', 408, { calleeId: c.calleeId, callId: Number(c.callId) });
     emit('update', 'callState', { state: 'connected', callId: c.callId });
     uiSafe(() => ui.setState('connected', { connectedAt: Date.now(), name: c.partner && c.partner.name }));
   }
 
-  function teardown(callId) {
+  // reason: only meaningful when the call was NOT answered — 4 = we cancelled (default),
+  // 3 = callee rejected/ended while ringing. Answered calls ignore it (rendered as a normal call).
+  function teardown(callId, reason) {
     const c = calls.get(String(callId)) || current;
-    if (!c) return;
+    if (!c) { zlog('teardown noop (no call)', callId); return; }
+    const answered = !!c.answered;
+    zlog('teardown', c.callId, 'answered=', answered, 'reason=', reason);
     try { if (c._iv) clearInterval(c._iv); } catch (_) {}
     try { c.audio && c.audio.stop(); } catch (_) {}
     try { c.session && c.session.close(); } catch (_) {}
     calls.delete(String(c.callId));
     if (current && String(current.callId) === String(c.callId)) current = null;
+    // Order matters (RE-verified): emit callState 'free' FIRST so callRunning=false, THEN the
+    // 'bubble'. The render has NO reactive call-state; the header refreshes only when the
+    // conversation changes. The bubble inserts the chat call-log message (via callbackGenerateMessage
+    // -> genMessageServer), which re-renders the header AFTER callRunning is already false -> the
+    // "in another call" tooltip flips back to normal. Emitting bubble first would re-render while
+    // callRunning is still true, leaving the tooltip stale.
     emit('update', 'callState', { state: 'free', callId: c.callId });
+    // Outgoing call-log. The render derives the label from action + params.reason (title/desc are
+    // dead), so we pass the outcome: role=1 (we are the caller), calltype 0=audio, missed=!answered,
+    // reason (4 cancel / 3 reject) for missed calls; answered -> reason 0 + real duration.
+    // partnerId MUST be the callee's real UID (used as the conversation id); duration in seconds.
+    const durationSec = answered ? (c.connectedAt ? Math.max(0, (Date.now() - c.connectedAt) / 1000) : 0) : 0;
+    const outReason = answered ? 0 : (reason != null ? reason : 4);
+    emit('update', 'bubble', { role: 1, duration: durationSec, partnerId: c.calleeId, reason: outReason, missed: !answered, calltype: 0 });
     uiSafe(() => { ui.setState('ended', { name: c.partner && c.partner.name }); setTimeout(() => uiSafe(() => ui.close()), uiCloseDelay); });
   }
 
@@ -110,10 +134,28 @@ function createMainEngine(opts) {
       if (p && !current) startOutgoing(p, m.data.type);   // one outgoing at a time (makeCall repeats)
     } else if (m.type === 'recvSignal' && Number(m.command) === 401) {
       onConfig(m.data).catch((e) => zlog('onConfig err', e && e.message));
+    } else if (m.type === 'recvSignal' && Number(m.command) === 409) {
+      teardown(current && current.callId, 2);   // remote hangup / timeout -> close (answered=normal call)
     } else if (m.type === 'control' && m.data && m.data.act) {
       const d = m.data.data || {};
-      if (m.data.act === 'answer') onAnswer(d.callId);
-      else if (m.data.act === 'end_call') teardown(d.callId);
+      zlog('control', m.data.act, 'status=', d.status, 'callId=', d.callId);
+      if (m.data.act === 'answer') {
+        // `control answer` carries a status: 0 = callee accepted; non-0 (e.g. 3) = declined/busy/
+        // no-answer. Only a real accept -> connect + start timer; anything else -> tear down.
+        const st = Number(d.status);
+        if (st === 0) onAnswer(d.callId, d);   // callee accepted -> connect + timer
+        else {
+          // `control answer` non-zero status = the call ended without a talk: map to a call-log reason.
+          // 3 = callee actively rejected ("Người nhận từ chối"); 6 = no-answer/timeout (generic
+          // "Cuộc gọi thoại đi 0 giây"). Unknown statuses fall back to generic. (Busy TBD.)
+          const r = ANSWER_STATUS_REASON[st] != null ? ANSWER_STATUS_REASON[st] : 2;
+          zlog('answer non-accept status', st, '-> reason', r);
+          teardown(d.callId, r);
+        }
+      }
+      // remote hangup / no-answer timeout arrive as cancel or end_call (NOT an active reject) ->
+      // reason 2 (generic "Cuộc gọi thoại đi"); an answered call ignores reason and shows duration.
+      else if (m.data.act === 'end_call' || m.data.act === 'cancel') teardown(d.callId, 2);
     } else if (m.type === 'request' && m.command === 'endCall') {
       teardown(m.data && m.data.callId);
     }
