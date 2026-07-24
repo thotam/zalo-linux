@@ -1,0 +1,72 @@
+name: zcall-capture
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'sanity | call'
+        default: 'sanity'
+jobs:
+  capture:
+    # zcall_mac.node is x86_64-only AND built against NODE_MODULE_VERSION 57 (Node 8 /
+    # Electron 2.0 era, ~2018). macos-latest is arm64, so we run x64 binaries under
+    # Rosetta 2. setup-node (x64) handles npm/scripts; the addon itself is loaded by a
+    # downloaded Node 8.17.0 (x64) whose ABI (57) matches the prebuilt addon.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ensure Rosetta 2 (run x64 binaries on arm64)
+        run: softwareupdate --install-rosetta --agree-to-license || true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          architecture: x64
+      - name: Install deps
+        run: npm install --no-audit --no-fund
+      - name: Install runner tools (wget + 7zz + gtimeout)
+        run: brew install wget sevenzip coreutils
+      - name: Obtain zcall_mac.node (extract from DMG)
+        env: { SETUP: 'true' }
+        run: node scripts/download-installer.js && node scripts/extract-installer.js
+      - name: Fetch Node 8.17.0 x64 (ABI 57 — the runtime the addon needs)
+        run: |
+          curl -sL https://nodejs.org/dist/v8.17.0/node-v8.17.0-darwin-x64.tar.gz | tar xz -C "$RUNNER_TEMP"
+          NODE8="$RUNNER_TEMP/node-v8.17.0-darwin-x64/bin/node"
+          echo "NODE8=$NODE8" >> "$GITHUB_ENV"
+          arch -x86_64 "$NODE8" -p "'node '+process.versions.node+' modules='+process.versions.modules+' arch='+process.arch" || echo "node8 self-check failed to run"
+      - name: Sanity (node8; electron2 fallback)
+        run: |
+          set +e
+          rm -f scratch/zcall-analysis/zcall-sanity.json
+          OUT_DIR=scratch/zcall-analysis arch -x86_64 "$NODE8" tools/zcall-re/harness.js
+          if [ ! -f scratch/zcall-analysis/zcall-sanity.json ]; then
+            echo "node8 produced no artifact (could not run?); trying electron 2.0.18"
+            OUT_DIR=scratch/zcall-analysis gtimeout 240 npx --yes electron@2.0.18 tools/zcall-re/harness.js || true
+          fi
+          echo "--- zcall-sanity.json ---"; cat scratch/zcall-analysis/zcall-sanity.json || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zcall-sanity
+          path: scratch/zcall-analysis/zcall-sanity.json
+          if-no-files-found: warn
+      - name: Driven call + capture
+        if: ${{ github.event.inputs.mode == 'call' }}
+        run: |
+          sudo tcpdump -i lo0 -w scratch/zcall-analysis/zcall.pcap 'udp and (port 59000 or port 59001)' &
+          TCPDUMP_PID=$!
+          sleep 1
+          arch -x86_64 "$NODE8" tools/zcall-re/udp-responder.js &
+          RESP_PID=$!
+          sleep 0.5
+          MODE=call OUT_DIR=scratch/zcall-analysis arch -x86_64 "$NODE8" tools/zcall-re/harness.js || true
+          sudo kill $RESP_PID || true
+          sleep 1
+          sudo kill $TCPDUMP_PID || true
+      - uses: actions/upload-artifact@v4
+        if: ${{ github.event.inputs.mode == 'call' }}
+        with:
+          name: zcall-call-capture
+          path: |
+            scratch/zcall-analysis/zcall.pcap
+            scratch/zcall-analysis/events.jsonl
+            scratch/zcall-analysis/call.log
+          if-no-files-found: warn

@@ -42,3 +42,4 @@ scratchpad/
 
 # Superpowers SDD scratch (briefs, reports, review diffs — never commit)
 .superpowers/
+scratch/zcall-analysis/
