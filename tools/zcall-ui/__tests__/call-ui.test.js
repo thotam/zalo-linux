@@ -21,10 +21,15 @@ class FakeWin {
   once(ev, cb) { this._once[ev] = cb; }
   removeAllListeners(ev) { delete this._on[ev]; }
   get webContents() { const self = this; return {
-    send: (ch, payload) => self.sent.push([ch, payload]),
+    // Model real Electron: the renderer's own ipcRenderer listener isn't registered until the
+    // page's script runs (after did-finish-load), so anything sent before that point never
+    // reaches it. Gating on `pageReady` (distinct from `loaded`, which just records the file
+    // path passed to loadFile()) lets tests exercise that race instead of hiding it behind a
+    // fake that records every send unconditionally.
+    send: (ch, payload) => { if (self.pageReady) self.sent.push([ch, payload]); },
     once: (ev, cb) => { self._once[ev] = cb; },
   }; }
-  _finishLoad() { if (this._once['did-finish-load']) this._once['did-finish-load'](); }
+  _finishLoad() { this.pageReady = true; if (this._once['did-finish-load']) this._once['did-finish-load'](); }
   _osClose() { if (this._on['closed']) this._on['closed'](); }
 }
 const ipcHandlers = {};
@@ -34,7 +39,7 @@ const fakeIpc = {
   _emit: (ch, msg) => { if (ipcHandlers[ch]) ipcHandlers[ch]({}, msg); },
 };
 
-const ui = createCallUI({ BrowserWindow: FakeWin, ipcMain: fakeIpc, htmlPath: '/x/call.html', preloadPath: '/x/preload.js', devicesHtmlPath: '/x/devices.html' });
+const ui = createCallUI({ BrowserWindow: FakeWin, ipcMain: fakeIpc, htmlPath: '/x/call.html', preloadPath: '/x/preload.js', devicesHtmlPath: '/x/devices.html', incomingHtmlPath: '/x/incoming.html' });
 
 // show -> constructs a frameless 456x720 window, loads html, sends partner after finish-load
 ui.show({ name: 'Tâm Tho', avatar: 'http://a/x.png' });
@@ -122,6 +127,91 @@ assert.ok(w2.sent.some(m => m[0] === 'zcall-ui:devices' && m[1].capture.length =
   const devW2 = lastWin; devW2._finishLoad();
   ui2.close();
   assert.ok(devW2.destroyed, 'close() destroys the device window too');
+})();
+
+// --- incoming call window (ring screen): showIncoming/closeIncoming, accept/decline routing,
+// state forwarding (for the ringtone), incwin window controls, close() cleanup ---
+(function () {
+  const ipc3 = {};
+  const fake3 = { on: (c, cb) => { ipc3[c] = cb; }, removeListener: () => {}, _emit: (c, m) => { if (ipc3[c]) ipc3[c]({}, m); } };
+  const ui3 = createCallUI({ BrowserWindow: FakeWin, ipcMain: fake3, htmlPath: '/x/call.html', preloadPath: '/x/preload.js', devicesHtmlPath: '/x/devices.html', incomingHtmlPath: '/x/incoming.html' });
+  let accepted = false, declined = false;
+  ui3.on('accept', () => { accepted = true; });
+  ui3.on('decline', () => { declined = true; });
+
+  ui3.showIncoming({ name: 'Caller X', avatar: null });
+  const incWin = lastWin;
+  assert.strictEqual(incWin.loaded, '/x/incoming.html', 'incoming window loads incoming.html');
+  incWin._finishLoad();
+  assert.ok(incWin.sent.some(m => m[0] === 'zcall-ui:partner' && m[1].name === 'Caller X'), 'partner sent to incoming window');
+
+  ui3.setState('ringing-incoming', { name: 'Caller X' });
+  assert.ok(incWin.sent.some(m => m[0] === 'zcall-ui:state' && m[1].state === 'ringing-incoming'), 'state forwarded to incoming window');
+
+  fake3._emit('zcall-ui:action', { action: 'accept' });
+  assert.ok(accepted, 'accept routed');
+  fake3._emit('zcall-ui:action', { action: 'decline' });
+  assert.ok(declined, 'decline routed');
+
+  fake3._emit('zcall-ui:action', { action: 'incwin', value: 'minimize' });
+  assert.ok(incWin.minimized, 'incwin routes window controls to the incoming window');
+
+  ui3.closeIncoming();
+  assert.ok(incWin.destroyed, 'incoming window destroyed by closeIncoming()');
+
+  // close() also destroys a live incoming window
+  ui3.showIncoming({ name: 'Caller Y' });
+  const incWin2 = lastWin; incWin2._finishLoad();
+  ui3.close();
+  assert.ok(incWin2.destroyed, 'close() destroys the incoming window too');
+})();
+
+// --- incoming-window state race (ringtone fix): the engine calls showIncoming(partner) then
+// setState('ringing-incoming', ...) in the SAME synchronous tick, before the incoming page's
+// did-finish-load fires. The renderer's ipcRenderer listener isn't registered until the page's
+// own script runs, so a state sent before load is unobservable to it -- exactly what the fake's
+// `loaded` gate above models. This must model the real ordering (not fire did-finish-load
+// synchronously) so the race is genuinely exercised, not hidden.
+(function () {
+  const ipc5 = {};
+  const fake5 = { on: (c, cb) => { ipc5[c] = cb; }, removeListener: () => {}, _emit: (c, m) => { if (ipc5[c]) ipc5[c]({}, m); } };
+  const ui5 = createCallUI({ BrowserWindow: FakeWin, ipcMain: fake5, htmlPath: '/x/call.html', preloadPath: '/x/preload.js', devicesHtmlPath: '/x/devices.html', incomingHtmlPath: '/x/incoming.html' });
+
+  ui5.showIncoming({ name: 'Caller Z' });
+  const incWinRace = lastWin;
+  // showIncoming -> setState happen back-to-back, BEFORE the page finishes loading.
+  ui5.setState('ringing-incoming', { name: 'Caller Z' });
+  assert.ok(!incWinRace.sent.some(m => m[0] === 'zcall-ui:state'), 'state sent before load is not observed by the (not-yet-ready) renderer -- the race is real');
+
+  // The page finishes loading afterwards; the fix must redeliver the latest state here so the
+  // ringtone still plays.
+  incWinRace._finishLoad();
+  assert.ok(incWinRace.sent.some(m => m[0] === 'zcall-ui:state' && m[1].state === 'ringing-incoming'), 'ringing-incoming state redelivered once the incoming window finishes loading (ringtone fix)');
+})();
+
+// --- device-list redelivery regression: setDevices() called BEFORE show() must not be lost for
+// the main call window's inline device menu (mirrors devWin's existing re-delivery on load) ---
+(function () {
+  const ipc4 = {};
+  const fake4 = { on: (c, cb) => { ipc4[c] = cb; }, removeListener: () => {}, _emit: (c, m) => { if (ipc4[c]) ipc4[c]({}, m); } };
+  const ui4 = createCallUI({ BrowserWindow: FakeWin, ipcMain: fake4, htmlPath: '/x/call.html', preloadPath: '/x/preload.js', devicesHtmlPath: '/x/devices.html' });
+  ui4.setDevices({ capture: [{ index: 0, name: 'Mic A' }], playback: [] });
+  ui4.show({ name: 'Partner Y' });
+  const callWin = lastWin;
+  callWin._finishLoad();
+  assert.ok(callWin.sent.some(m => m[0] === 'zcall-ui:devices' && m[1].capture && m[1].capture[0].name === 'Mic A'), 'devices set before show() are redelivered to the call window on load');
+})();
+
+// --- callType seam: show() accepts opts.callType (0=audio, default). Future video would branch
+// on opts.callType===1 (not implemented). Audio path must remain unchanged. ---
+(function () {
+  const ipc6 = {};
+  const fake6 = { on: (c, cb) => { ipc6[c] = cb; }, removeListener: () => {}, _emit: (c, m) => { if (ipc6[c]) ipc6[c]({}, m); } };
+  const ui6 = createCallUI({ BrowserWindow: FakeWin, ipcMain: fake6, htmlPath: '/x/call.html', preloadPath: '/x/preload.js' });
+  ui6.show({ name: 'A' }, { callType: 0 });
+  const callWin = lastWin;
+  assert.strictEqual(callWin.loaded, '/x/call.html', 'audio callType still opens call.html');
+  console.log('OK call-ui callType');
 })();
 
 console.log('OK call-ui');

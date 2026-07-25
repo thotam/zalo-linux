@@ -1,11 +1,10 @@
 :root {
   --zalo-blue: #0190f3;
-  --red-end: #ee4b44;
   --ink: #1a1a1a;
   --line: #e1e4ea;
-  --titlebar-bg: #f3f3f3;
+  --titlebar-bg: #1A1A1A;
   --close-hover: #c42b1c;
-  --timer-green: #0a4f30;
+  --timer-green: #12905a;
   --controlbar-bg: rgba(20,20,20,.9);
   --pill-bg: rgba(255,255,255,.10);
 }
@@ -19,18 +18,18 @@ body {
 }
 #titlebar {
   height: 32px; display: flex; align-items: center; gap: 8px;
-  padding: 0 0 0 12px; background: var(--titlebar-bg); color: var(--ink);
+  padding: 0 0 0 12px; background: var(--titlebar-bg); color: #fff;
   -webkit-app-region: drag;
 }
 #titlebar .tb-icon { color: var(--zalo-blue); font-size: 16px; }
-#titlebar .tb-title { font-size: 13px; font-weight: 600; }
+#tb-title, #titlebar .tb-title { font-size: 13px; font-weight: 600; color: #fff; }
 .tb-spacer { flex: 1; }
 .wc {
   -webkit-app-region: no-drag; width: 40px; height: 32px;
   display: flex; align-items: center; justify-content: center;
-  cursor: pointer; color: #46556a;
+  cursor: pointer; color: rgba(255,255,255,.75);
 }
-.wc:hover { background: rgba(0,0,0,.06); }
+.wc:hover { background: rgba(255,255,255,.1); }
 .wc-close:hover { background: var(--close-hover); color: #fff; }
 .wc-min-i { width: 10px; height: 1px; background: currentColor; }
 .wc-max-i { width: 9px; height: 9px; border: 1px solid currentColor; }
@@ -45,7 +44,7 @@ body {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   padding-bottom: 96px;   /* lift the avatar above center, over the bottom bar (like Windows) */
   overflow: hidden;
-  background: linear-gradient(160deg, #0068ff 0%, #004bb9 100%);   /* fallback */
+  background: #1A1A1A;   /* native ZaloCall stage color */
 }
 #bg {
   position: absolute; inset: 0;
@@ -71,13 +70,22 @@ body[data-state="calling"] #avatar-wrap { width: 130px; height: 130px; }
 body[data-state="calling"] #avatar { inset: 6px; border-width: 0; }
 body[data-state="calling"] #ring { display: block; animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
-#status { margin-top: 18px; font-size: 15px; text-shadow: 0 1px 4px rgba(0,0,0,.4); min-height: 20px; }
+#status {
+  margin-top: 18px; font-size: 15px; min-height: 20px;
+  color: #fff; font-family: Roboto, 'Segoe UI', sans-serif;
+  background: rgba(0,0,0,.39); border-radius: 5px; padding: 4px 12px;
+}
+#status:empty { background: transparent; padding: 0; }   /* e.g. connected: timer shown instead */
 #timer {
   position: absolute; top: 8px; left: 8px; display: none;
-  background: var(--timer-green); color: #fff; font-size: 13px; font-weight: 600;
+  background: rgba(0,0,0,.5); font-size: 13px; font-weight: 600; color: #fff;
   padding: 2px 8px; border-radius: 3px;
 }
 body[data-state="connected"] #timer { display: block; }
+.timer-normal { color: #fff; }
+.timer-warn { color: #f8d15a; }
+/* secure = SRTP-encrypted (engine emits secure:true on connect): green pill, white text */
+.timer-secure { background: var(--timer-green); color: #fff; }
 #endtoast {
   position: absolute; display: none; background: rgba(0,0,0,.72); color: #fff;
   font-size: 13px; padding: 8px 14px; border-radius: 6px;
@@ -92,28 +100,25 @@ body[data-state="ended"] #endtoast { display: block; }
   display: inline-flex; align-items: center; justify-content: center;
   border: none; cursor: pointer; background: transparent; color: #fff;
 }
-/* camera / mic split-button pill */
+/* speaker / mic split-button pill */
 .pill {
   display: inline-flex; align-items: center; height: 40px;
   background: var(--pill-bg); border-radius: 20px; overflow: hidden;
 }
 .pill:hover { background: rgba(255,255,255,.16); }
 .pill-main { width: 42px; height: 40px; }
-.pill-main .zic { font-size: 22px; }
-#btn-cam .zic { font-size: 18px; }   /* camcorder glyph is wider — balance mic */
 .pill-chev { width: 22px; height: 40px; color: rgba(255,255,255,.85); }
 .pill-chev .zic { font-size: 12px; }
 /* hangup */
 #btn-end {
-  width: 40px; height: 40px; border-radius: 50%; background: var(--red-end); color: #fff;
+  width: 40px; height: 40px; border-radius: 50%; background: #ef4e49; color: #fff;
 }
 #btn-end:hover { background: #e5403a; }
-#btn-end .zic { font-size: 18px; transform: rotate(135deg); }
 /* gear pinned right */
 #btn-gear { position: absolute; right: 14px; top: 50%; transform: translateY(-50%); width: 40px; height: 40px; }
-#btn-gear .zic { font-size: 22px; }
 #btn-gear:hover { background: rgba(255,255,255,.12); border-radius: 8px; }
-.btn-active .zic { color: var(--red-end) !important; }  /* mic muted */
+/* muted mic/speaker is shown by swapping to the *_off.png (dark glyph + red slash on a
+   brighter circle) in call.js — no extra tint needed. */
 #mic-menu {
   position: absolute; left: 50%; transform: translateX(-50%); bottom: 62px; display: none;
   background: #fff; color: var(--ink); border-radius: 8px; min-width: 268px; max-width: 320px;

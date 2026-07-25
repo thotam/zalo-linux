@@ -58,7 +58,7 @@ class MediaSession extends EventEmitter {
   // several probes per relay, counts 0x02 replies (recv) and measures rtt. Selects preferHost if it
   // replied, else the best relay (highest recv, then lowest rtt), and sets this.relay + this.flowToken
   // from that SAME reply. Resolves { selected, results, flowToken, host, port } (or null).
-  open({ servers, fromId, toId, callId, sessId, preferHost, relayPort = RELAY_PORT, probes = 6, timeoutMs = 1800 }) {
+  open({ servers, fromId, toId, callId, sessId, preferHost, isCallee, relayPort = RELAY_PORT, probes = 6, timeoutMs = 1800 }) {
     return new Promise((resolve) => {
       const byHost = new Map();   // host -> { host, recv, rtt, flowToken, relayAddr }
       let sentAt = 0;
@@ -78,7 +78,7 @@ class MediaSession extends EventEmitter {
           const host = String(raw).split(/[|:]/)[0].trim();
           if (!host || seen.has(host)) continue;
           seen.add(host);
-          this.sock.send(buildRequest({ fromId, toId, callId, sessId }), relayPort, host);
+          this.sock.send(buildRequest({ fromId, toId, callId, sessId, isCallee }), relayPort, host);
           for (let k = 0; k < probes; k++) this.sock.send(buildProbe({ fromId, callId, probeNonce: crypto.randomBytes(4) }), relayPort, host);
         }
         setTimeout(() => {

@@ -40,7 +40,7 @@ temp/
 # Local scratch — real Zalo JXL samples used for tests (personal images, never commit)
 scratchpad/
 
-# Superpowers SDD scratch (briefs, reports, review diffs — never commit)
+# Superpowers SDD scratch (briefs, reports, review diffs, RE dumps — never commit)
 .superpowers/
-scratch/zcall-analysis/
+scratch/
 tools/zcall-re/sample-keying-redacted.json

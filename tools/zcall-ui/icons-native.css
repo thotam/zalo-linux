@@ -1,0 +1,9 @@
+/* tools/zcall-ui/icons-native.css — native PNG icons (extracted from ZaloCall.exe) */
+.nic { width: 28px; height: 28px; background-size: contain; background-repeat: no-repeat; background-position: center; display: inline-block; }
+.nic-mic         { background-image: url("assets/native/mic.png"); }
+.nic-mic-off     { background-image: url("assets/native/mic_off.png"); }
+.nic-speaker     { background-image: url("assets/native/speaker.png"); }
+.nic-speaker-off { background-image: url("assets/native/speaker_off.png"); }
+.nic-endcall     { background-image: url("assets/native/endcall.png"); }
+.nic-gear        { background-image: url("assets/native/setting.png"); }
+.nic-more        { background-image: url("assets/native/more.png"); }

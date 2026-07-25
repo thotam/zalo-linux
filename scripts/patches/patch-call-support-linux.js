@@ -19,10 +19,7 @@ const logger = require('../utils/logger');
 // os-version check and isSupport() generically (regex-captured var names).
 //
 //   1. neutralize the `<17` check so ae() is true on Linux (buttons can render), and
-//   2. wrap isSupport() to console.ERROR its components ([CALLDIAG] ...) — captured by the
-//      main-process CONSOLE diagnostics hook — so we see whether enableCall / enableVideoCall
-//      (server-driven) are the next gap. (Electron 39's console-message only forwards
-//      warning/error level; console.log/info is dropped.)
+//   2. rewrite isSupport() to drop the enable_mac_call gate, returning (enableCall && osOk).
 // Idempotent per file; fail-loud if NO bundle carries the gate (bundle format changed).
 // ---------------------------------------------------------------------------
 
@@ -42,15 +39,9 @@ const FORCED_MARKER = '/*mac-forced*/';
 
 // isSupport() with the `enable_mac_call` requirement DROPPED — that flag is the macOS
 // build/entitlement gate the server keeps 0 for this account, but the actual call feature
-// (enableCall && osOk) is on. Returns enableCall && osOk; still logs the real enable_mac_call.
-function instrumentedIsSupport(obj, osOk) {
-  return (
-    'isSupport(){' + FORCED_MARKER + 'var _mc=' + obj + '.default.enable_mac_call;' +
-    'var _s=!!(' + obj + '.default.enableCall&&' + osOk + ');' +
-    'try{console.error("[CALLDIAG] isSupport="+_s+" enable_mac_call="+_mc+' +
-    '" enableCall="+' + obj + '.default.enableCall+" enableVideoCall="+' + obj + '.default.enableVideoCall+' +
-    '" osOk="+' + osOk + ')}catch(_e){}return _s}'
-  );
+// (enableCall && osOk) is on. Returns enableCall && osOk.
+function forcedIsSupport(obj, osOk) {
+  return 'isSupport(){' + FORCED_MARKER + 'return!!(' + obj + '.default.enableCall&&' + osOk + ')}';
 }
 
 // Every top-level *.js and lazy/*.js bundle. We patch whichever ones carry the gate.
@@ -82,8 +73,8 @@ function patchOne(file) {
     changed = true;
   }
 
-  // 2. isSupport(): drop the enable_mac_call gate + instrument. Idempotent via FORCED_MARKER;
-  //    upgrades either the original form OR a prior (non-forced) instrumented form.
+  // 2. isSupport(): drop the enable_mac_call gate. Idempotent via FORCED_MARKER;
+  //    rewrites either the original form OR a prior (non-forced) instrumented form.
   if (!s.includes(FORCED_MARKER)) {
     let m = s.match(IS_RE);
     let re = IS_RE;
@@ -94,7 +85,7 @@ function patchOne(file) {
         // Extremely unlikely (both are the same config module); bail rather than mis-patch.
         throw new Error('patch-call-support-linux: isSupport() object mismatch (' + obj + ' vs ' + obj2 + ') in ' + path.basename(file));
       }
-      s = s.replace(re, instrumentedIsSupport(obj, osOk));
+      s = s.replace(re, forcedIsSupport(obj, osOk));
       changed = true;
     }
   }
@@ -115,7 +106,7 @@ async function main() {
     // Either nothing carried the gate (format drift) or all were already patched.
     const anyGate = bundles.some((f) => {
       const s = fs.readFileSync(f, 'utf8');
-      return s.includes(AE_PATCHED) || s.includes(IS_MARKER);
+      return s.includes(AE_PATCHED) || s.includes(FORCED_MARKER) || s.includes(IS_MARKER);
     });
     if (!anyGate) {
       throw new Error('patch-call-support-linux: no bundle carries the call gate (ae()<17 / isSupport) — bundle format changed.');
@@ -124,7 +115,7 @@ async function main() {
     return;
   }
 
-  logger.success('call-support-linux: ae()<17 bypassed + isSupport() instrumented in ' + patched.length + ' bundle(s): ' + patched.join(', '));
+  logger.success('call-support-linux: ae()<17 bypassed + isSupport() enable_mac_call gate dropped in ' + patched.length + ' bundle(s): ' + patched.join(', '));
 }
 
 if (require.main === module) main().catch((e) => { logger.error(e.message); process.exit(1); });

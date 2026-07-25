@@ -1,0 +1,12 @@
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#1A1A1A; color:#fff; font-family:Roboto,'Segoe UI',sans-serif; height:100vh; -webkit-user-select:none; }
+#wrap { height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; -webkit-app-region:drag; }
+#avatar { width:120px; height:120px; border-radius:50%; background:#0068ff center/cover no-repeat; z-index:1; }
+#wave { position:absolute; top:calc(50% - 130px); width:200px; height:200px; border-radius:50%;
+  background:url("assets/native/decor-call-wave@2x.png") center/contain no-repeat; animation:pulse 1.6s ease-out infinite; }
+@keyframes pulse { 0%{transform:scale(.85);opacity:.7} 100%{transform:scale(1.25);opacity:0} }
+#name { font-size:20px; font-weight:600; }
+#sub { font-size:14px; color:#c7c7c7; }
+#actions { display:flex; gap:64px; margin-top:24px; -webkit-app-region:no-drag; }
+.rbtn { width:64px; height:64px; border:none; border-radius:50%; cursor:pointer; background:transparent; }
+.rbtn img { width:64px; height:64px; }
