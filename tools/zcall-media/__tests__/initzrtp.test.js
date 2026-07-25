@@ -25,7 +25,11 @@ assert.strictEqual(req.length, 185, 'request length');
 assert.strictEqual(req[0], 0x01, 'req type');
 assert.strictEqual(req[1], 0x7e, 'req flag');
 assert.strictEqual(req.readUInt32LE(10), 0x11223344, 'req fromId LE');
-assert.strictEqual(req[18], 0x0b, 'req subtype');
+assert.strictEqual(req[18], 0x0b, 'req subtype = 0x0b (caller, default)');
+// Role-encoded subtype (RE'd from ZaloCall.exe): caller 0x0b, callee 0x0c. Relay rejects a callee
+// that sends 0x0b (25-byte -106 error, no flowToken).
+const reqCallee = buildRequest({ fromId: 0x11223344, toId: 0x55667788, callId: 0x0a, sessId, isCallee: true });
+assert.strictEqual(reqCallee[18], 0x0c, 'callee req subtype = 0x0c');
 assert.strictEqual(req[19], 0x00, 'req has-sessId hi');
 assert.strictEqual(req[20], 0x02, 'req has-sessId lo');
 assert.strictEqual(req.readUInt32LE(21), 0x0a, 'req callId LE');

@@ -22,7 +22,7 @@ function buildProbe({ fromId, callId, probeNonce }) {
 // REQUEST — type 0x01, subtype 0x0b (§A.1). Total = 31-byte header + sessId. The sessId is a
 // variable-length base64url token (observed 152 and 154 chars); the length field @29 = its real
 // length, so the packet is 31 + sessId.length bytes (185 for a 154-char sessId).
-function buildRequest({ fromId, toId, callId, sessId }) {
+function buildRequest({ fromId, toId, callId, sessId, isCallee }) {
   if (typeof sessId !== 'string' || sessId.length < 30 || sessId.length > 0xffff) {
     throw new Error('buildRequest: sessId must be a string of 30..65535 chars, got ' +
       (typeof sessId === 'string' ? sessId.length : typeof sessId));
@@ -32,7 +32,10 @@ function buildRequest({ fromId, toId, callId, sessId }) {
   buf[0] = 0x01;                       // type
   buf[1] = 0x7e;                       // flag
   buf.writeUInt32LE(fromId >>> 0, 10); // fromId LE
-  buf[18] = 0x0b;                      // subtype = InitZRTP
+  // subtype = InitZRTP, ROLE-encoded (RE'd from ZaloCall.exe _sendRequestInitZRTPToServer /
+  // fcn.0089419c: word@0x18 = (isCaller?0:1)+11). 0x0b = InitZRTP-from-caller, 0x0c = from-callee.
+  // Sending 0x0b as the callee makes the relay reject the registration (25-byte -106 error, no flowToken).
+  buf[18] = isCallee ? 0x0c : 0x0b;
   buf[19] = 0x00; buf[20] = 0x02;      // has-sessId flag/count
   buf.writeUInt32LE(callId >>> 0, 21); // callId LE
   buf.writeUInt32LE(toId >>> 0, 25);   // toId LE

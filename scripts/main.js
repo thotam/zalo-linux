@@ -69,13 +69,10 @@ async function main() {
       await require('./patches/patch-native-image-flags.js').main();
       await require('./patches/patch-video-thumb-flag.js').main();
       await require('./patches/patch-clipboard-image-paste.js').main();
-      // DIAGNOSTICS-ONLY (call gap-finding; remove before release): instruments the
-      // Linux call path — webviewTag + main-process webview/permission/console logging.
-      await require('./patches/patch-call-diagnostics.js').main();
       await require('./patches/patch-call-support-linux.js').main();
       await require('./patches/patch-zcall-main-engine.js').main();
       await require('./patches/patch-call-log.js').main();
-      await require('./patches/patch-call-trace.js').main();
+      await require('./patches/patch-call-incoming-enrich.js').main();
       logger.success('All patches applied');
     }
 

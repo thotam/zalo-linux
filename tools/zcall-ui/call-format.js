@@ -10,9 +10,17 @@
   }
   function statusText(state, name) {
     name = name || '';
-    if (state === 'calling') return 'Đang nối máy đến ' + name;
+    if (state === 'calling') return 'Đang gọi ' + name;
+    if (state === 'ringing') return 'Đang đổ chuông...';
+    if (state === 'connecting') return 'Đang kết nối...';
     if (state === 'ended') return name + ' đã kết thúc cuộc gọi.';
     return '';
   }
-  return { formatDuration: formatDuration, statusText: statusText };
+  function timerClass(state, o) {
+    o = o || {};
+    if (state === 'connected' && o.secure) return 'timer-secure';
+    if (o.quality === 'poor') return 'timer-warn';
+    return 'timer-normal';
+  }
+  return { formatDuration: formatDuration, statusText: statusText, timerClass: timerClass };
 });

@@ -21,7 +21,8 @@ const REPLACEMENT =
   "if(!globalThis.__zeng){var _P=_R('path');var _b=_P.join(__dirname,'..','native');" +
   "var _mkUi=function(){try{var _el=_R('electron');var _u=_P.join(_b,'zcall-ui');" +
   "return _R(_P.join(_u,'call-ui.js')).createCallUI({BrowserWindow:_el.BrowserWindow,ipcMain:_el.ipcMain," +
-  "htmlPath:_P.join(_u,'call.html'),preloadPath:_P.join(_u,'preload.js'),devicesHtmlPath:_P.join(_u,'devices.html')});}catch(_ue){try{console.error('[ZENGINE ui]',_ue&&_ue.stack||_ue)}catch(__){}return null;}};" +
+  "htmlPath:_P.join(_u,'call.html'),preloadPath:_P.join(_u,'preload.js'),devicesHtmlPath:_P.join(_u,'devices.html')," +
+  "incomingHtmlPath:_P.join(_u,'incoming.html')});}catch(_ue){try{console.error('[ZENGINE ui]',_ue&&_ue.stack||_ue)}catch(__){}return null;}};" +
   "globalThis.__zeng=_R(_P.join(_b,'zcall-engine','main-engine.js')).createMainEngine({" +
   "sendToRender:function(mm){w.webContents.send(mm.type==='update'?'call-update':'call-send-signal',mm.command,mm.data)}," +
   "ui:_mkUi()});}" +
@@ -86,6 +87,12 @@ async function main() {
   // Copy the call-window UI (minus its tests) to app/native/zcall-ui/.
   fs.ensureDirSync(UI_DIR);
   fs.copySync(UI_SRC, UI_DIR, { filter: (src) => !src.split(path.sep).includes('__tests__') });
+  if (!fs.existsSync(path.join(UI_DIR, 'assets', 'native', 'accept_audiocall.png'))) {
+    throw new Error('patch-zcall-main-engine: native assets missing after copy');
+  }
+  if (!fs.existsSync(path.join(UI_DIR, 'incoming.html'))) {
+    throw new Error('patch-zcall-main-engine: incoming.html missing after copy');
+  }
   // Reuse the app's own icon font for the call glyphs (fail loud if the render bundle moved it).
   const fontMatch = fs.existsSync(FONTS_DIR)
     ? fs.readdirSync(FONTS_DIR).find((f) => /^zalo-font\..*\.ttf$/.test(f))

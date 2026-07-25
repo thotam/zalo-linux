@@ -7,11 +7,13 @@ const { buildExtendData, OPUS_CODEC } = require('../zcall-signaling/call-control
 
 function parseAddr(s) { const m = String(s).split(/[:|]/); return { host: m[0], port: Number(m[1]) || 4200 }; }
 
-// Reliable engine log (preload console isn't always visible): append to ~/zalo-engine.log.
+// Engine trace. Always to console.error; the persistent ~/zalo-engine.log append (preload console
+// isn't always visible) only when ZALO_CALL_DEBUG is set — opt-in debugging, off in shipping builds.
 let LOGF = null;
 function zlog() {
   const msg = '[ZENGINE ' + new Date().toISOString() + '] ' + Array.from(arguments).join(' ');
   try { console.error(msg); } catch (_) {}
+  if (!process.env.ZALO_CALL_DEBUG) return;
   try {
     if (LOGF === null) LOGF = require('path').join(require('os').homedir(), 'zalo-engine.log');
     require('fs').appendFileSync(LOGF, msg + '\n');

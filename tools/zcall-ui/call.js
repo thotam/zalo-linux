@@ -4,7 +4,11 @@
   var partner = { name: '', avatar: null };
   var timerIv = null, connectedAt = 0;
   var muted = false;
+  var speakerMuted = false;
   var devices = { capture: [], playback: [] }, selIn = -1, selOut = -1;
+  var sounds = window.createSounds
+    ? window.createSounds({ make: function (n) { var a = new Audio('assets/native/' + n); return a; } })
+    : { apply: function () {}, stopAll: function () {} };
 
   function setBg(url) {
     if (url) { $('bg').style.backgroundImage = 'url("' + url + '")'; $('bg').classList.add('on');
@@ -36,6 +40,8 @@
     var state = s && s.state || 'calling';
     document.body.setAttribute('data-state', state);
     applyStatus(state);
+    sounds.apply(state, s && s.outcome);
+    $('timer').className = window.CallFormat.timerClass(state, { secure: s && s.secure, quality: s && s.quality });
     if (state === 'connected') { connectedAt = (s && s.connectedAt) || Date.now(); startTimer(); }
     else if (state === 'ended' || state === 'free') { stopTimer(); }
   });
@@ -81,7 +87,7 @@
   $('btn-mic').addEventListener('click', function () {
     muted = !muted;
     $('btn-mic').classList.toggle('btn-active', muted);
-    $('btn-mic').querySelector('.zic').className = 'zic ' + (muted ? 'zic-mic-off' : 'zic-mic');
+    $('btn-mic').querySelector('.nic').className = 'nic ' + (muted ? 'nic-mic-off' : 'nic-mic');
     api.action('mute', muted);
   });
   $('mic-chev').addEventListener('click', function () { $('mic-menu').classList.toggle('on'); });
@@ -90,9 +96,14 @@
   document.addEventListener('click', function (ev) {
     var m = $('mic-menu');
     if (!m.classList.contains('on')) return;
-    if (m.contains(ev.target) || ev.target.closest('#mic-chev')) return;
+    if (m.contains(ev.target) || ev.target.closest('#mic-chev') || ev.target.closest('#speaker-chev')) return;
     m.classList.remove('on');
   });
-  $('btn-cam').addEventListener('click', function () { api.action('toggleCamera'); });
-  $('cam-chev').addEventListener('click', function () { api.action('toggleCamera'); });
+  $('btn-speaker').addEventListener('click', function () {
+    speakerMuted = !speakerMuted;
+    $('btn-speaker').classList.toggle('btn-active', speakerMuted);
+    $('btn-speaker').querySelector('.nic').className = 'nic ' + (speakerMuted ? 'nic-speaker-off' : 'nic-speaker');
+    api.action('toggleSpeaker', speakerMuted);
+  });
+  $('speaker-chev').addEventListener('click', function () { $('mic-menu').classList.toggle('on'); });
 })();

@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https: data:; style-src 'self' 'unsafe-inline'; font-src 'self'" />
   <link rel="stylesheet" href="icons.css" />
+  <link rel="stylesheet" href="icons-native.css" />
   <link rel="stylesheet" href="call.css" />
   <title>Zalo Call</title>
 </head>
@@ -28,20 +29,21 @@
 
     <div id="bar">
       <div class="pill">
-        <button class="ctl pill-main" id="btn-cam"><span class="zic zic-cam"></span></button>
-        <button class="ctl pill-chev" id="cam-chev"><span class="zic zic-chevron-up"></span></button>
+        <button class="ctl pill-main" id="btn-speaker"><span class="nic nic-speaker"></span></button>
+        <button class="ctl pill-chev" id="speaker-chev"><span class="zic zic-chevron-up"></span></button>
       </div>
-      <button class="ctl" id="btn-end"><span class="zic zic-endcall"></span></button>
+      <button class="ctl" id="btn-end"><span class="nic nic-endcall"></span></button>
       <div class="pill">
-        <button class="ctl pill-main" id="btn-mic"><span class="zic zic-mic"></span></button>
+        <button class="ctl pill-main" id="btn-mic"><span class="nic nic-mic"></span></button>
         <button class="ctl pill-chev" id="mic-chev"><span class="zic zic-chevron-up"></span></button>
       </div>
-      <button class="ctl" id="btn-gear"><span class="zic zic-gear"></span></button>
+      <button class="ctl" id="btn-gear"><span class="nic nic-gear"></span></button>
     </div>
     <div id="mic-menu"></div>
   </div>
 
   <script src="call-format.js"></script>
+  <script src="sounds.js"></script>
   <script src="call.js"></script>
 </body>
 </html>

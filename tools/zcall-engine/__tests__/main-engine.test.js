@@ -45,6 +45,8 @@ const eng = createMainEngine({
   assert.ok(s416.data.codec.includes('opus/16000/1'), '416 opus codec');
   const ext = JSON.parse(s416.data.extendData);
   assert.ok(ext.serverResult.length>=1 && ext.serverAddr.length===1 && ext.srtpMode===1, '416 extendData');
+  // setupMedia populated the call: extendData available + audio started
+  assert.ok(s416.data.session === CONFIG.sessId, '416 carries sessId as session');
 
   eng.handleSendToNative({ type:'control', data:{ act:'answer', data:{ callId:4242, status:0 } } });
   await new Promise(r=>setTimeout(r,10));
@@ -70,7 +72,7 @@ let lastAudio = null;
 class SpyAudio extends FakeAudio { constructor(o){ super(o); lastAudio = this; } }
 const eng2 = createMainEngine({
   sendToRender: (m) => out2.push(m),
-  MediaSession: FakeSession, ZAudio: SpyAudio, ui: fakeUi, uiCloseDelay: 5,
+  MediaSession: FakeSession, ZAudio: SpyAudio, ui: fakeUi, uiCloseDelay: 5, connectDelayMs: 5,
   os: { networkInterfaces: () => ({ eth0: [{ family: 'IPv4', internal: false, address: '192.168.1.9' }] }) },
   randomCallId: () => 7777,
 });
@@ -85,8 +87,10 @@ const eng2 = createMainEngine({
 
   eng2.handleSendToNative({ type:'control', data:{ act:'answer', data:{ callId:7777, status:0 } } });
   await new Promise(r=>setTimeout(r,10));
+  // The caller's answer counts the duration immediately -> connected right away (no 'connecting' pause).
   const conn = uiCalls.find(c=>c[0]==='setState' && c[1]==='connected');
-  assert.ok(conn && typeof conn[2].connectedAt === 'number', 'ui connected + connectedAt');
+  assert.ok(conn && typeof conn[2].connectedAt === 'number', 'answer -> ui connected immediately + connectedAt');
+  assert.ok(!uiCalls.some(c=>c[0]==='setState' && c[1]==='connecting'), 'answer does NOT emit a connecting state (immediate count)');
 
   // window actions route back to engine/audio
   uiHandlers['mute'](true);
@@ -213,12 +217,12 @@ const eng2 = createMainEngine({
   console.log('OK main-engine timeout-status');
 })().catch(e=>{ console.error(e); process.exit(1); });
 
-// --- busy: `control answer status=1` -> reason 1 "Người nhận bận" (RE'd from native) ---
+// --- busy: `control answer status=1` -> reason 1 "Người nhận bận" + busy.mp3 outcome (RE'd from native) ---
 (async () => {
-  const outB = []; const hB = {};
+  const outB = []; const uiB = []; const hB = {};
   const engB = createMainEngine({
     sendToRender:(m)=>outB.push(m), MediaSession:FakeSession, ZAudio:FakeAudio, uiCloseDelay:5,
-    ui:{ show:()=>{}, setState:()=>{}, setDevices:()=>{}, on:(e,cb)=>{hB[e]=cb;}, close:()=>{} },
+    ui:{ show:()=>{}, setState:(s,d)=>uiB.push([s,d]), setDevices:()=>{}, on:(e,cb)=>{hB[e]=cb;}, close:()=>{} },
     os:{ networkInterfaces:()=>({eth0:[{family:'IPv4',internal:false,address:'192.168.1.9'}]}) },
     randomCallId:()=>1919,
   });
@@ -228,5 +232,211 @@ const eng2 = createMainEngine({
   engB.handleSendToNative({ type:'control', data:{ act:'answer', data:{ callId:1919, status:1 } } });
   const bubB = outB.find(m=>m.command==='bubble');
   assert.ok(bubB && bubB.data.missed===true && bubB.data.reason===1, 'busy (status 1) -> missed reason 1 (Người nhận bận)');
+  // The end tone for a busy line is busy.mp3, not endcall.mp3 (RE ZaloCall.exe onReceiverBusy).
+  const endedB = uiB.find(c=>c[0]==='ended');
+  assert.ok(endedB && endedB[1] && endedB[1].outcome==='busy', 'busy (status 1) -> ui ended outcome "busy" (busy.mp3)');
   console.log('OK main-engine busy-status');
+})().catch(e=>{ console.error(e); process.exit(1); });
+
+// --- caller receives 407 ringring -> ringing state (ringback), no outbound signal ---
+(async () => {
+  const outR = []; const uiR = [];
+  const engR = createMainEngine({
+    sendToRender:(m)=>outR.push(m), MediaSession:FakeSession, ZAudio:FakeAudio, uiCloseDelay:5,
+    ui:{ show:()=>{}, setState:(s,d)=>uiR.push([s,d]), setDevices:()=>{}, on:()=>{}, close:()=>{} },
+    os:{ networkInterfaces:()=>({eth0:[{family:'IPv4',internal:false,address:'192.168.1.9'}]}) },
+    randomCallId:()=>5151,
+  });
+  engR.handleSendToNative({ type:'request', command:'makeCall', data:{ partner:[{ id:'6664', name:'R' }], type:1 } });
+  await new Promise(r=>setTimeout(r,20));
+  outR.length = 0; uiR.length = 0;
+  engR.handleSendToNative({ type:'recvSignal', command:407, data:{ callId:5151 } });
+  assert.ok(outR.some(m=>m.command==='callState' && m.data.state==='ringing'), '407 -> callState ringing');
+  assert.ok(uiR.some(c=>c[0]==='ringing'), '407 -> ui ringing');
+  assert.ok(!outR.some(m=>m.type==='sendSignal'), '407 sends no outbound signal');
+  console.log('OK main-engine ringing');
+})().catch(e=>{ console.error(e); process.exit(1); });
+
+// --- no-answer: ring timeout fires -> 405 cancel + missed bubble reason 2 ---
+(async () => {
+  const outN = []; const hN = {};
+  const engN = createMainEngine({
+    sendToRender:(m)=>outN.push(m), MediaSession:FakeSession, ZAudio:FakeAudio, uiCloseDelay:5, ringTimeoutMs:30, connectDelayMs:5,
+    ui:{ show:()=>{}, setState:()=>{}, setDevices:()=>{}, on:(e,cb)=>{hN[e]=cb;}, close:()=>{} },
+    os:{ networkInterfaces:()=>({eth0:[{family:'IPv4',internal:false,address:'192.168.1.9'}]}) },
+    randomCallId:()=>8181,
+  });
+  engN.handleSendToNative({ type:'request', command:'makeCall', data:{ partner:[{ id:'6664', name:'N' }], type:1 } });
+  engN.handleSendToNative({ type:'recvSignal', command:401, data:CONFIG });
+  await new Promise(r=>setTimeout(r,60));  // > ringTimeoutMs
+  assert.ok(outN.some(m=>m.command===405), 'ring timeout -> 405 cancel');
+  const bubN = outN.find(m=>m.command==='bubble');
+  assert.ok(bubN && bubN.data.missed===true && bubN.data.reason===2, 'ring timeout -> missed reason 2');
+  console.log('OK main-engine no-answer-timeout');
+})().catch(e=>{ console.error(e); process.exit(1); });
+
+// --- incoming: control request -> 407 ring + ringing-incoming + showIncoming ---
+// Real incoming `control request` payload shape (live-RE'd): sessId = data.session (+ params.sessId),
+// relays in params.extendData.serverResult + data.rtpAddress, our uid = data.uidTo, caller = data.uidN.
+const INC_SESS = 'S'.repeat(160);
+const INC = { act:'request', act_type:'voip', _caller:{ name:'Caller X', avatar:'http://a/c.png' },
+  data:{ callId:6001, uidFrom:'999', uidN:'333', uidTo:'444', status:'0', ts:String(Date.now()),
+    codec:'[{"name":"opus/16000/1","payload":112}]',
+    session: INC_SESS, rtpAddress:'10.0.0.2:4200', rtcpAddress:'10.0.0.2:4200',
+    params: JSON.stringify({ rtpIP:'10.0.0.2:4200', sessId: INC_SESS,
+      extendData: JSON.stringify({ callType:0, srtpMode:1,
+        serverResult:[{rtp:'10.0.0.2:4200', rtcp:'10.0.0.2:4200', rtt:50, recv:14},
+                      {rtp:'10.0.0.3:4200', rtcp:'10.0.0.3:4200', rtt:80, recv:11}] }) }) } };
+(async () => {
+  const outI = []; const uiI = []; const hI = {};
+  const engI = createMainEngine({
+    sendToRender:(m)=>outI.push(m), MediaSession:FakeSession, ZAudio:FakeAudio, uiCloseDelay:5, connectDelayMs:5,
+    ui:{ show:()=>{}, showIncoming:(p)=>uiI.push(['showIncoming',p]), setState:(s,d)=>uiI.push(['setState',s,d]), setDevices:()=>{}, on:(e,cb)=>{hI[e]=cb;}, close:()=>uiI.push(['close']), closeIncoming:()=>uiI.push(['closeIncoming']) },
+    os:{ networkInterfaces:()=>({eth0:[{family:'IPv4',internal:false,address:'192.168.1.9'}]}) },
+    randomCallId:()=>1,
+  });
+  engI.handleSendToNative({ type:'control', data: JSON.parse(JSON.stringify(INC)) });
+  await new Promise(r=>setTimeout(r,10));
+  assert.ok(outI.some(m=>m.command===407 && m.data.callId===6001 && String(m.data.callerId)==='333'), 'incoming -> 407 ringring, callerId = uidN (routing id)');
+  assert.ok(outI.some(m=>m.command==='callState' && m.data.state==='ringing-incoming'), 'incoming -> ringing-incoming');
+  assert.ok(uiI.some(c=>c[0]==='showIncoming' && c[1].name==='Caller X'), 'ui.showIncoming(caller)');
+  // busy path
+  const busyCtrl = JSON.parse(JSON.stringify(INC)); busyCtrl.inCallStatus='zalo'; busyCtrl.data.callId=6002;
+  outI.length=0;
+  engI.handleSendToNative({ type:'control', data: busyCtrl });
+  assert.ok(outI.some(m=>m.command===402 && m.data.status===1 && m.data.callId===6002), 'busy -> 402 status 1');
+  console.log('OK main-engine incoming-ring');
+})().catch(e=>{ console.error(e); process.exit(1); });
+
+// --- incoming accept -> 402 status 0 + media + connected ---
+(async () => {
+  const outA = []; const uiA = []; const hA = {};
+  const engA = createMainEngine({
+    sendToRender:(m)=>outA.push(m), MediaSession:FakeSession, ZAudio:FakeAudio, uiCloseDelay:5, connectDelayMs:5,
+    ui:{ show:(p)=>uiA.push(['show',p]), showIncoming:(p)=>uiA.push(['showIncoming',p]), setState:(s,d)=>uiA.push(['setState',s,d]), setDevices:()=>{}, on:(e,cb)=>{hA[e]=cb;}, close:()=>uiA.push(['close']), closeIncoming:()=>uiA.push(['closeIncoming']) },
+    os:{ networkInterfaces:()=>({eth0:[{family:'IPv4',internal:false,address:'192.168.1.9'}]}) },
+    randomCallId:()=>1,
+  });
+  engA.handleSendToNative({ type:'control', data: JSON.parse(JSON.stringify(INC)) });
+  await new Promise(r=>setTimeout(r,10));
+  hA['accept']();
+  await new Promise(r=>setTimeout(r,20));
+  // Media-first: setupMedia opens the relay as the callee, then 402 answer carries our extendData.
+  const ans = outA.find(m=>m.command===402);
+  assert.ok(ans && ans.data.status===0 && ans.data.session===INC_SESS, 'accept -> 402 status 0 + session (from data.session)');
+  assert.strictEqual(String(ans.data.callerId), '333', 'accept 402 callerId = uidN (routing id)');
+  assert.ok(ans.data.codec.includes('opus/16000/1'), '402 opus codec');
+  assert.ok(ans.data.extendData && ans.data.extendData.length > 2, '402 carries our extendData (relay+p2p)');
+  assert.ok(uiA.some(c=>c[0]==='closeIncoming'), 'accept closes incoming window');
+  assert.ok(uiA.some(c=>c[0]==='show'), 'accept opens call window');
+  assert.ok(uiA.some(c=>c[0]==='setState' && c[1]==='connected'), 'accept -> connected (media up)');
+  // test-hygiene: setupMedia started c._iv (setInterval) — tear the call down so the process can exit.
+  engA.stop();
+  // An ANSWERED incoming call gets an engine call-log bubble (role 0, not missed) — the app doesn't
+  // sync answered-incoming logs to us, so we provide it.
+  const bubAns = outA.find(m=>m.command==='bubble');
+  assert.ok(bubAns && bubAns.data.role===0 && bubAns.data.missed===false, 'answered incoming -> engine bubble role 0, not missed');
+  console.log('OK main-engine incoming-accept');
+})().catch(e=>{ console.error(e); process.exit(1); });
+
+// --- incoming decline -> 402 status 3 + teardown role 0 ---
+(async () => {
+  const outD2 = []; const uiD2 = []; const hD2 = {};
+  const engD2 = createMainEngine({
+    sendToRender:(m)=>outD2.push(m), MediaSession:FakeSession, ZAudio:FakeAudio, uiCloseDelay:5,
+    ui:{ show:()=>{}, showIncoming:(p)=>uiD2.push(['showIncoming',p]), setState:(s,d)=>uiD2.push(['setState',s,d]), setDevices:()=>{}, on:(e,cb)=>{hD2[e]=cb;}, close:()=>uiD2.push(['close']), closeIncoming:()=>uiD2.push(['closeIncoming']) },
+    os:{ networkInterfaces:()=>({eth0:[{family:'IPv4',internal:false,address:'192.168.1.9'}]}) },
+    randomCallId:()=>1,
+  });
+  engD2.handleSendToNative({ type:'control', data: JSON.parse(JSON.stringify(INC)) });
+  await new Promise(r=>setTimeout(r,10));
+  hD2['decline']();
+  const ans3 = outD2.find(m=>m.command===402 && m.data.status===3);
+  assert.ok(ans3, 'decline -> 402 status 3');
+  assert.strictEqual(ans3.data.session, INC_SESS, 'decline 402 carries session (so the reject registers)');
+  assert.strictEqual(String(ans3.data.callerId), '333', 'decline 402 callerId = uidN (routing id, so the reject reaches the caller)');
+  // The app logs INCOMING calls natively -> the engine must NOT emit its own bubble (would double-log).
+  assert.ok(!outD2.some(m=>m.command==='bubble'), 'incoming decline emits NO engine bubble (native logs incoming)');
+  assert.ok(outD2.some(m=>m.command==='callState' && m.data.state==='free'), 'incoming decline -> callState free');
+  assert.ok(uiD2.some(c=>c[0]==='closeIncoming'), 'decline closes incoming window');
+  console.log('OK main-engine incoming-decline');
+})().catch(e=>{ console.error(e); process.exit(1); });
+
+// --- incoming remote cancel (caller hangs up while ringing) -> close incoming + callState free ---
+(async () => {
+  const outRC = []; const uiRC = []; const hRC = {};
+  const engRC = createMainEngine({
+    sendToRender:(m)=>outRC.push(m), MediaSession:FakeSession, ZAudio:FakeAudio, uiCloseDelay:5,
+    ui:{ show:()=>{}, showIncoming:(p)=>uiRC.push(['showIncoming',p]), setState:(s,d)=>uiRC.push(['setState',s,d]), setDevices:()=>{}, on:(e,cb)=>{hRC[e]=cb;}, close:()=>uiRC.push(['close']), closeIncoming:()=>uiRC.push(['closeIncoming']) },
+    os:{ networkInterfaces:()=>({eth0:[{family:'IPv4',internal:false,address:'192.168.1.9'}]}) },
+    randomCallId:()=>1,
+  });
+  engRC.handleSendToNative({ type:'control', data: JSON.parse(JSON.stringify(INC)) });
+  await new Promise(r=>setTimeout(r,10));
+  engRC.handleSendToNative({ type:'control', data:{ act:'cancel', data:{ callId:6001 } } });
+  assert.ok(uiRC.some(c=>c[0]==='closeIncoming'), 'remote cancel closes incoming window');
+  assert.ok(outRC.some(m=>m.command==='callState' && m.data.state==='free'), 'remote cancel -> callState free');
+  console.log('OK main-engine incoming-remote-cancel');
+})().catch(e=>{ console.error(e); process.exit(1); });
+
+// --- outgoing: remote ringing arrives as `control ring_ring` (NOT recvSignal 407) -> ringing state ---
+(async () => {
+  const outRR = []; const uiRR = [];
+  const engRR = createMainEngine({
+    sendToRender:(m)=>outRR.push(m), MediaSession:FakeSession, ZAudio:FakeAudio, uiCloseDelay:5, connectDelayMs:5, ringTimeoutMs:100000,
+    ui:{ show:()=>{}, setState:(s,d)=>uiRR.push([s,d]), setDevices:()=>{}, on:()=>{}, close:()=>{}, showIncoming:()=>{}, closeIncoming:()=>{} },
+    os:{ networkInterfaces:()=>({eth0:[{family:'IPv4',internal:false,address:'192.168.1.9'}]}) },
+    randomCallId:()=>5252,
+  });
+  engRR.handleSendToNative({ type:'request', command:'makeCall', data:{ partner:[{ id:'6664', name:'RR' }], type:1 } });
+  engRR.handleSendToNative({ type:'recvSignal', command:401, data:CONFIG });
+  await new Promise(r=>setTimeout(r,20));
+  outRR.length = 0; uiRR.length = 0;
+  engRR.handleSendToNative({ type:'control', data:{ act:'ring_ring', data:{ callId:5252, status:0 } } });
+  assert.ok(outRR.some(m=>m.command==='callState' && m.data.state==='ringing'), 'control ring_ring -> callState ringing');
+  assert.ok(uiRR.some(c=>c[0]==='ringing'), 'control ring_ring -> ui ringing (ringback)');
+  assert.ok(!outRR.some(m=>m.type==='sendSignal'), 'control ring_ring sends no outbound signal');
+  engRR.stop();
+  console.log('OK main-engine outgoing-ring_ring');
+})().catch(e=>{ console.error(e); process.exit(1); });
+
+// --- speaker mute gates inbound playback (RE ZaloCall.exe muteSpeaker = output mute) + a duplicate
+//     `control answer status:0` is ignored (native state machine only answers from the ringing state) ---
+(async () => {
+  const outS = []; const hS = {};
+  let spySession = null, playCount = 0;
+  class SpySession extends FakeSession { constructor(o){ super(o); spySession = this; } }
+  class CountAudio extends FakeAudio { play(){ playCount++; } }
+  const engS = createMainEngine({
+    sendToRender:(m)=>outS.push(m), MediaSession:SpySession, ZAudio:CountAudio, uiCloseDelay:5, connectDelayMs:100000, ringTimeoutMs:100000,
+    ui:{ show:()=>{}, setState:()=>{}, setDevices:()=>{}, on:(e,cb)=>{hS[e]=cb;}, close:()=>{}, showIncoming:()=>{}, closeIncoming:()=>{} },
+    os:{ networkInterfaces:()=>({eth0:[{family:'IPv4',internal:false,address:'192.168.1.9'}]}) },
+    randomCallId:()=>8888,
+  });
+  engS.handleSendToNative({ type:'request', command:'makeCall', data:{ partner:[{ id:'6664', name:'S' }], type:1 } });
+  engS.handleSendToNative({ type:'recvSignal', command:401, data:CONFIG });
+  await new Promise(r=>setTimeout(r,20));
+  engS.handleSendToNative({ type:'control', data:{ act:'answer', data:{ callId:8888, status:0 } } });
+  await new Promise(r=>setTimeout(r,5));
+
+  // default: inbound media is played out
+  spySession._h['media']({ payload: Buffer.alloc(4) });
+  assert.strictEqual(playCount, 1, 'inbound media played out by default');
+  // speaker muted: media still arrives but is NOT played out
+  hS['toggleSpeaker'](true);
+  spySession._h['media']({ payload: Buffer.alloc(4) });
+  assert.strictEqual(playCount, 1, 'speaker muted -> inbound media not played out');
+  // unmuted again: playback resumes
+  hS['toggleSpeaker'](false);
+  spySession._h['media']({ payload: Buffer.alloc(4) });
+  assert.strictEqual(playCount, 2, 'speaker unmuted -> playback resumes');
+
+  // a duplicate `control answer status:0` for the already-connected call is a no-op (no 2nd 408)
+  const n408 = outS.filter(m=>m.command===408).length;
+  engS.handleSendToNative({ type:'control', data:{ act:'answer', data:{ callId:8888, status:0 } } });
+  await new Promise(r=>setTimeout(r,5));
+  assert.strictEqual(outS.filter(m=>m.command===408).length, n408, 'duplicate answer ignored -> no second 408');
+
+  engS.stop();   // clear c._iv / c._connTimer so the process can exit
+  console.log('OK main-engine speaker-mute + dup-answer');
 })().catch(e=>{ console.error(e); process.exit(1); });
